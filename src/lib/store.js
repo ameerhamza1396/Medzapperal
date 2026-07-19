@@ -69,6 +69,22 @@ export async function deleteProduct(id) {
   if (error) throw error;
 }
 
+export async function archiveProduct(id) {
+  const { error } = await supabase.from("products").update({ is_active: false }).eq("id", id);
+  if (error) throw error;
+}
+
+export async function placeCodOrder({ shippingAddress, items }) {
+  if (!supabase) throw new Error("Supabase is not configured.");
+  const payload = items.map(item => ({ variant_id: item.variantId, quantity: item.quantity }));
+  const { data, error } = await supabase.rpc("place_cod_order", {
+    p_shipping_address: shippingAddress,
+    p_items: payload
+  });
+  if (error) throw error;
+  return Array.isArray(data) ? data[0] : data;
+}
+
 export async function fetchAdminData() {
   if (!supabase) return { categories: [], colors: [], clothTypes: [], orders: [] };
   const [categories, colors, clothTypes, orders] = await Promise.all([

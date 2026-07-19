@@ -1,15 +1,15 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  ArrowLeft, ArrowRight, BarChart3, Check, ChevronDown, CircleUserRound,
-  Heart, LayoutGrid, Menu, Minus, Moon, Package, Plus, Search, ShoppingBag,
+  ArrowLeft, ArrowRight, Banknote, BarChart3, Check, ChevronDown, CircleUserRound,
+  CreditCard, Heart, LayoutGrid, MapPin, Menu, Minus, Moon, Package, Plus, Search, ShoppingBag,
   ShieldCheck, SlidersHorizontal, Sparkles, Sun, Trash2, X
 } from "lucide-react";
 import hero from "./assets/medzapperal-hero.png";
 import { AuthPage } from "./Auth";
 import { getMyProfile, isSupabaseConfigured, supabase } from "./lib/supabase";
 import { deleteFromImageKit, uploadToImageKit } from "./lib/imagekit";
-import { createProductWithVariants, deleteProduct, fetchAdminData, fetchCatalog, slugify, updateProductWithVariants } from "./lib/store";
+import { createProductWithVariants, deleteProduct, fetchAdminData, fetchCatalog, placeCodOrder, slugify, updateProductWithVariants } from "./lib/store";
 import "./styles.css";
 
 const palette = {
@@ -17,6 +17,36 @@ const palette = {
   Wine: "#722f48", Olive: "#78836a", White: "#e9e7df", Sage: "#8e9b88"
 };
 const pkr = value => new Intl.NumberFormat("en-PK",{style:"currency",currency:"PKR",maximumFractionDigits:0}).format(Number(value)||0);
+
+function prepareOrderChime() {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return {play:()=>{},dispose:()=>{}};
+    const context = new AudioContext();
+    context.resume();
+    return {
+      play:() => {
+      const gain = context.createGain();
+      gain.connect(context.destination);
+      gain.gain.setValueAtTime(.0001,context.currentTime);
+      gain.gain.exponentialRampToValueAtTime(.14,context.currentTime+.03);
+      gain.gain.exponentialRampToValueAtTime(.0001,context.currentTime+.9);
+      [[523.25,0],[659.25,.13],[783.99,.27]].forEach(([frequency,delay]) => {
+        const oscillator = context.createOscillator();
+        oscillator.type = "sine";
+        oscillator.frequency.value = frequency;
+        oscillator.connect(gain);
+        oscillator.start(context.currentTime+delay);
+        oscillator.stop(context.currentTime+delay+.55);
+      });
+      setTimeout(()=>context.close(),1300);
+      },
+      dispose:()=>context.close()
+    };
+  } catch {
+    return {play:()=>{},dispose:()=>{}};
+  }
+}
 
 const categoryCards = [
   ["Scrubs", "Built for every move"],
@@ -74,7 +104,10 @@ function App() {
   const goShop = (category = "All") => { setQuery(category === "All" ? "" : category); setPage("shop"); setMenuOpen(false); };
   const openProduct = p => { setSelected(p); setPage("product"); };
   const add = (product, size = product.sizes[0], color = product.colors[0]) => {
-    setCart(c => [...c, { ...product, cartId: Date.now(), size, color }]);
+    const variant = product.variants?.find(v => v.size === size && v.colors?.name === color) || product.variants?.[0];
+    if (!variant) return;
+    const price = variant.price_override == null ? product.price : Number(variant.price_override);
+    setCart(c => [...c, { ...product, price, cartId: `${Date.now()}-${Math.random()}`, size:variant.size, color:variant.colors?.name||color, variantId:variant.id }]);
     setCartOpen(true);
   };
 
@@ -86,18 +119,41 @@ function App() {
     {page === "product" && selected && <Product product={selected} add={add} openProduct={openProduct} products={products}/>}
     {page === "auth" && <AuthPage user={user} profile={profile} onDone={() => setPage("home")} onAdmin={() => setPage("admin")} onSignOut={async () => { await supabase?.auth.signOut(); setPage("home"); }}/>}
     {page === "admin" && <Admin user={user} profile={profile} authReady={authReady} onLogin={() => setPage("auth")} products={products} onCreated={loadCatalog} />}
+    {page === "checkout" && <Checkout user={user} profile={profile} cart={cart} setCart={setCart} onLogin={()=>setPage("auth")} onShop={()=>goShop("All")} />}
     <Footer goShop={goShop}/>
-    <Cart cart={cart} setCart={setCart} open={cartOpen} close={() => setCartOpen(false)}/>
+    <Cart cart={cart} setCart={setCart} open={cartOpen} close={() => setCartOpen(false)} onCheckout={()=>{setCartOpen(false);setPage("checkout")}}/>
   </div>;
 }
 
 function Header({dark,setDark,page,setPage,goShop,cart,setCartOpen,menuOpen,setMenuOpen,query,setQuery,user}) {
+  const menuButtonRef = useRef(null);
+  const menuRef = useRef(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const closeOutside = event => {
+      if (!menuRef.current?.contains(event.target) && !menuButtonRef.current?.contains(event.target)) {
+        setMenuOpen(false);
+      }
+    };
+    const closeOnEscape = event => {
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+        menuButtonRef.current?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [menuOpen,setMenuOpen]);
   return <header>
-    <button className="mobile-only icon-btn" onClick={() => setMenuOpen(!menuOpen)}><Menu/></button>
+    <button ref={menuButtonRef} className="mobile-only icon-btn" aria-label="Open menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><Menu/></button>
     <button className="logo" onClick={() => setPage("home")} aria-label="Medzapperal home">
-      <span className="logo-mark"><i/><i/><i/></span>MEDZAPPERAL
+      <img className="brand-logo" src="/media/medz-logo.png" alt=""/>MEDZAPPERAL
     </button>
-    <nav className={menuOpen ? "open" : ""}>
+    <nav ref={menuRef} className={menuOpen ? "open" : ""}>
       <button onClick={() => goShop("Scrubs")}>Scrubs</button>
       <button onClick={() => goShop("Lab Coats")}>Lab coats</button>
       <button onClick={() => goShop("Jackets")}>Jackets</button>
@@ -107,23 +163,53 @@ function Header({dark,setDark,page,setPage,goShop,cart,setCartOpen,menuOpen,setM
     <div className="header-actions">
       <button className="icon-btn desktop-only" onClick={() => { if (page !== "shop") { setPage("shop"); setQuery(""); } }}><Search size={20}/></button>
       <button className="icon-btn" onClick={() => setDark(!dark)}>{dark ? <Sun size={19}/> : <Moon size={19}/>}</button>
-      <button className="icon-btn desktop-only account-button" aria-label={user ? "My account" : "Sign in"} onClick={() => setPage("auth")}><CircleUserRound size={20}/>{user && <i/>}</button>
+      <button className="icon-btn account-button" aria-label={user ? "My account" : "Sign in"} onClick={() => setPage("auth")}><CircleUserRound size={20}/>{user && <i/>}</button>
       <button className="icon-btn cart-button" onClick={() => setCartOpen(true)}><ShoppingBag size={20}/>{cart.length > 0 && <b>{cart.length}</b>}</button>
     </div>
   </header>;
 }
 
 function Home({goShop,openProduct,add,products,catalogLoading}) {
-  return <main>
+  useEffect(() => {
+    const root = document.querySelector(".home-page");
+    if (!root) return;
+    const elements = root.querySelectorAll(
+      ".hero-seo > *, .values > *, .section-head, .category, .products-section .product-card, .manifesto > *, .newsletter > *"
+    );
+    elements.forEach((element,index) => {
+      element.classList.add("scroll-reveal");
+      element.style.setProperty("--reveal-delay",`${(index%4)*70}ms`);
+    });
+    if (!("IntersectionObserver" in window)) {
+      elements.forEach(element=>element.classList.add("is-visible"));
+      return;
+    }
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add("is-visible");
+          observer.unobserve(entry.target);
+        }
+      });
+    },{threshold:.12,rootMargin:"0px 0px -7% 0px"});
+    elements.forEach(element=>observer.observe(element));
+    return () => observer.disconnect();
+  },[products.length,catalogLoading]);
+  const categoryImage = name =>
+    products.find(product =>
+      product.image && product.category?.toLowerCase() === name.toLowerCase()
+    )?.image || hero;
+  return <main className="home-page">
     <section className="hero">
-      <img src={hero} alt="Healthcare professionals in modern Medzapperal scrubs"/>
-      <div className="hero-copy">
-        <p className="eyebrow">THE NEW UNIFORM</p>
-        <h1>Made for<br/>the <em>shift.</em></h1>
-        <p>Elevated essentials engineered for the pace, purpose, and people behind every day of care.</p>
-        <button className="primary" onClick={() => goShop("All")}>Shop the collection <ArrowRight size={17}/></button>
-      </div>
-      <p className="hero-note">01 — SPRING / SUMMER 2026</p>
+      <video autoPlay muted loop playsInline poster="/media/medz-hero-poster.jpg" aria-label="Medz Apparel medical uniforms and outerwear collection">
+        <source src="/media/medz-hero.webm" type="video/webm"/>
+        <img src="/media/medz-hero.gif" alt="Medz Apparel medical uniforms and outerwear collection"/>
+      </video>
+    </section>
+    <section className="hero-seo">
+      <p className="eyebrow">MEDICAL APPAREL / PAKISTAN</p>
+      <h1>Premium Medical Scrubs and Healthcare Apparel in Pakistan</h1>
+      <h2>Comfortable uniforms designed for doctors, nurses, and healthcare professionals.</h2>
     </section>
     <section className="values">
       <p>Designed with purpose.</p>
@@ -135,7 +221,7 @@ function Home({goShop,openProduct,add,products,catalogLoading}) {
       <div className="section-head"><div><p className="eyebrow">SHOP BY CATEGORY</p><h2>Find your uniform.</h2></div><button className="text-link" onClick={() => goShop("All")}>View all <ArrowRight size={16}/></button></div>
       <div className="category-grid">{categoryCards.map(([name,tag],i) =>
         <button className={`category c${i+1}`} key={name} onClick={() => goShop(name)}>
-          <img src={hero} alt=""/><span><small>0{i+1}</small><strong>{name}</strong><em>{tag} <ArrowRight size={15}/></em></span>
+          <img src={categoryImage(name)} alt={`${name} from the Medz Apparel collection`}/><span><small>0{i+1}</small><strong>{name}</strong><em>{tag} <ArrowRight size={15}/></em></span>
         </button>)}</div>
     </section>
     <ProductRow title="The shift favorites." label="MOST LOVED" list={products.slice(0,4)} {...{openProduct,add,goShop}} />
@@ -225,11 +311,69 @@ function Product({product,add,openProduct,products}) {
   </main>;
 }
 
-function Cart({cart,setCart,open,close}) {
+function Cart({cart,setCart,open,close,onCheckout}) {
   const total=cart.reduce((s,p)=>s+p.price,0);
   return <><div className={`overlay ${open?"show":""}`} onClick={close}/><aside className={`cart-drawer ${open?"open":""}`}><div className="cart-head"><h2>Your bag <span>{cart.length}</span></h2><button onClick={close}><X/></button></div>
     {!cart.length ? <div className="empty"><ShoppingBag/><h3>Your bag is taking a break.</h3><p>Fill it with something made for the shift.</p><button className="primary" onClick={close}>Continue shopping</button></div> :
-    <><div className="cart-items">{cart.map(item=><div className="cart-item" key={item.cartId}><img src={item.image}/><div><strong>{item.name}</strong><span>{item.color} / {item.size}</span><b>{pkr(item.price)}</b></div><button onClick={()=>setCart(c=>c.filter(x=>x.cartId!==item.cartId))}><Trash2 size={16}/></button></div>)}</div><div className="cart-bottom"><p><span>Subtotal</span><b>{pkr(total)}</b></p><small>Shipping calculated at checkout.</small><button className="primary">Checkout <ArrowRight size={17}/></button></div></>}</aside></>;
+    <><div className="cart-items">{cart.map(item=><div className="cart-item" key={item.cartId}><img src={item.image}/><div><strong>{item.name}</strong><span>{item.color} / {item.size}</span><b>{pkr(item.price)}</b></div><button onClick={()=>setCart(c=>c.filter(x=>x.cartId!==item.cartId))}><Trash2 size={16}/></button></div>)}</div><div className="cart-bottom"><p><span>Subtotal</span><b>{pkr(total)}</b></p><small>Shipping calculated at checkout.</small><button className="primary" onClick={onCheckout}>Checkout <ArrowRight size={17}/></button></div></>}</aside></>;
+}
+
+const pakistanCities = ["Abbottabad","Bahawalpur","Bannu","Chiniot","Dera Ghazi Khan","Faisalabad","Gilgit","Gujranwala","Gujrat","Hyderabad","Islamabad","Jacobabad","Jhelum","Karachi","Kasur","Khanewal","Khuzdar","Kohat","Lahore","Larkana","Mardan","Mirpur","Multan","Muzaffarabad","Nawabshah","Nowshera","Okara","Peshawar","Quetta","Rahim Yar Khan","Rawalpindi","Sahiwal","Sargodha","Sheikhupura","Sialkot","Sukkur","Swabi","Thatta","Turbat","Wah Cantt"];
+
+function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
+  const [step,setStep]=useState("details");
+  const [placing,setPlacing]=useState(false);
+  const [error,setError]=useState("");
+  const [order,setOrder]=useState(null);
+  const [address,setAddress]=useState({country:"Pakistan",city:"",recipient_name:profile?.full_name||user?.user_metadata?.full_name||"",complete_address:"",mobile:profile?.phone||"",secondary_mobile:""});
+  useEffect(()=>{if(!address.recipient_name&&(profile?.full_name||user?.user_metadata?.full_name))setAddress(a=>({...a,recipient_name:profile?.full_name||user?.user_metadata?.full_name}))},[profile,user]);
+  const grouped=useMemo(()=>Object.values(cart.reduce((acc,item)=>{const key=item.variantId;if(!acc[key])acc[key]={...item,quantity:0};acc[key].quantity++;return acc},{})),[cart]);
+  const subtotal=grouped.reduce((sum,item)=>sum+item.price*item.quantity,0);
+  const delivery=200+(50*cart.length);
+  const total=subtotal+delivery;
+  const validCity=pakistanCities.includes(address.city);
+  const review=e=>{e.preventDefault();setError("");if(!validCity)return setError("Please select a city from the list.");setStep("review")};
+  const confirm=async()=>{
+    const chime=prepareOrderChime();
+    setPlacing(true);setError("");
+    try{
+      const result=await placeCodOrder({shippingAddress:address,items:grouped});
+      setOrder(result);setCart([]);setStep("success");chime.play();
+    }catch(e){chime.dispose();setError(e.message)}finally{setPlacing(false)}
+  };
+  if(!user)return <main className="auth-page"><section className="account-card"><ShoppingBag/><p className="eyebrow">CHECKOUT</p><h1>Sign in to continue.</h1><p>Your account keeps your delivery details and order history secure.</p><button className="primary" onClick={onLogin}>Sign in</button></section></main>;
+  if(!cart.length&&step!=="success")return <main className="auth-page"><section className="account-card"><ShoppingBag/><p className="eyebrow">YOUR BAG</p><h1>Your bag is empty.</h1><button className="primary" onClick={onShop}>Browse the collection</button></section></main>;
+  if(step==="success")return <main className="checkout-page success-page"><div className="success-modal-backdrop"><section className="order-success order-success-modal" role="dialog" aria-modal="true" aria-labelledby="order-success-title">
+    <div className="success-confetti" aria-hidden="true">{Array.from({length:14},(_,index)=><i key={index} style={{"--x":`${7+(index*7)%90}%`,"--delay":`${(index%7)*.08}s`,"--spin":`${index%2?180:-180}deg`}}/>)}</div>
+    <span className="success-check"><Check/></span><p className="eyebrow">ORDER RECEIVED</p><h1 id="order-success-title">Thank you for your order.</h1><p>Your cash-on-delivery order has been placed. We’ll contact you before dispatch.</p><div><span>Order reference</span><b>#{order?.order_id?.slice(0,8).toUpperCase()}</b></div><div><span>Total payable</span><b>{pkr(order?.order_total)}</b></div><button className="primary" onClick={onShop}>Continue shopping <ArrowRight size={16}/></button>
+  </section></div></main>;
+  return <main className="checkout-page">
+    <div className="checkout-title"><p className="eyebrow">SECURE CHECKOUT</p><h1>{step==="details"?"Delivery details":"Review your order"}</h1><div className="checkout-steps"><span className="active">1 Delivery</span><i/><span className={step==="review"?"active":""}>2 Review</span><i/><span>3 Confirmation</span></div></div>
+    <div className="checkout-layout">
+      <section className="checkout-main">
+        {step==="details"?<form className="checkout-form" onSubmit={review}>
+          <div className="form-section-title"><MapPin/><div><h2>Shipping address</h2><p>We currently deliver throughout Pakistan.</p></div></div>
+          <div className="checkout-fields">
+            <label>Country<input value="Pakistan" disabled/></label>
+            <label>City *<input list="pakistan-cities" value={address.city} onChange={e=>setAddress({...address,city:e.target.value})} placeholder="Search and select city" required/><datalist id="pakistan-cities">{pakistanCities.map(city=><option key={city} value={city}/>)}</datalist></label>
+            <label className="wide">Recipient name *<input value={address.recipient_name} onChange={e=>setAddress({...address,recipient_name:e.target.value})} required/></label>
+            <label>Mobile number *<input type="tel" value={address.mobile} onChange={e=>setAddress({...address,mobile:e.target.value})} placeholder="03XX XXXXXXX" pattern="(?:\\+92|0)3[0-9]{9}" required/></label>
+            <label>Secondary mobile number <small>Optional</small><input type="tel" value={address.secondary_mobile} onChange={e=>setAddress({...address,secondary_mobile:e.target.value})} placeholder="03XX XXXXXXX" pattern="(?:\\+92|0)3[0-9]{9}|^$"/></label>
+            <label className="wide">Complete address *<textarea rows="4" value={address.complete_address} onChange={e=>setAddress({...address,complete_address:e.target.value})} placeholder="House or apartment, street, area and nearby landmark" required/></label>
+          </div>
+          <div className="payment-title"><h2>Payment method</h2></div>
+          <div className="payment-options"><button type="button" className="payment-option disabled" disabled><CreditCard/><span><b>Bank cards</b><small>Coming soon</small></span></button><button type="button" className="payment-option selected"><Banknote/><span><b>Cash on delivery</b><small>Pay when your order arrives</small></span><Check/></button></div>
+          {error&&<div className="auth-error">{error}</div>}<button className="primary checkout-next">Review order <ArrowRight size={17}/></button>
+        </form>:<div className="review">
+          <div className="review-block"><div className="review-head"><h2>Delivery address</h2><button onClick={()=>setStep("details")}>Edit</button></div><b>{address.recipient_name}</b><p>{address.complete_address}<br/>{address.city}, Pakistan<br/>{address.mobile}{address.secondary_mobile&&` · ${address.secondary_mobile}`}</p></div>
+          <div className="review-block"><h2>Payment</h2><p><Banknote size={17}/> Cash on delivery</p></div>
+          <div className="review-block"><h2>Items</h2>{grouped.map(item=><div className="review-item" key={item.variantId}><img src={item.image}/><div><b>{item.name}</b><span>{item.color} / {item.size} · Qty {item.quantity}</span></div><strong>{pkr(item.price*item.quantity)}</strong></div>)}</div>
+          {error&&<div className="auth-error">{error}</div>}<button className="primary confirm-order" disabled={placing} onClick={confirm}>{placing?"Placing order…":"Confirm cash on delivery order"} <ArrowRight size={17}/></button>
+        </div>}
+      </section>
+      <aside className="checkout-summary"><h2>Order summary</h2>{grouped.map(item=><div className="summary-item" key={item.variantId}><span>{item.name} <small>× {item.quantity}</small></span><b>{pkr(item.price*item.quantity)}</b></div>)}<div className="summary-line"><span>Subtotal</span><b>{pkr(subtotal)}</b></div><div className="summary-line"><span>Delivery</span><b>{pkr(delivery)}</b></div><div className="summary-total"><span>Total</span><b>{pkr(total)}</b></div><p>Taxes, if applicable, are included.</p></aside>
+    </div>
+  </main>;
 }
 
 function Admin({ user, profile, authReady, onLogin, products, onCreated }) {
@@ -347,7 +491,7 @@ function Admin({ user, profile, authReady, onLogin, products, onCreated }) {
 }
 
 function Footer({goShop}) {
-  return <footer><div className="footer-brand"><span className="logo-mark"><i/><i/><i/></span><h2>MEDZAPPERAL</h2><p>Made for the shift.<br/>Designed for what matters.</p></div><div><h3>Shop</h3>{["Scrubs","Lab Coats","Jackets","Accessories"].map(x=><button key={x} onClick={()=>goShop(x)}>{x}</button>)}</div><div><h3>Help</h3><a>Size guide</a><a>Shipping & returns</a><a>Contact us</a><a>FAQ</a></div><div><h3>Follow</h3><a>Instagram</a><a>TikTok</a><a>Pinterest</a></div><div className="footer-bottom"><span>© 2026 MEDZAPPERAL</span><span>Privacy · Terms · Accessibility</span></div></footer>;
+  return <footer><div className="footer-brand"><img className="brand-logo footer-logo" src="/media/medz-logo.png" alt="Medz Apparel"/><h2>MEDZAPPERAL</h2><p>Made for the shift.<br/>Designed for what matters.</p></div><div><h3>Shop</h3>{["Scrubs","Lab Coats","Jackets","Accessories"].map(x=><button key={x} onClick={()=>goShop(x)}>{x}</button>)}</div><div><h3>Help</h3><a>Size guide</a><a>Shipping & returns</a><a>Contact us</a><a>FAQ</a></div><div><h3>Follow</h3><a>Instagram</a><a>TikTok</a><a>Pinterest</a></div><div className="footer-bottom"><span>© 2026 MEDZAPPERAL</span><span>Privacy · Terms · Accessibility</span></div></footer>;
 }
 
 createRoot(document.getElementById("root")).render(<App/>);
