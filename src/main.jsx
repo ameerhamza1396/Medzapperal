@@ -2,14 +2,14 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   ArrowLeft, ArrowRight, Banknote, BarChart3, Check, ChevronDown, CircleUserRound,
-  CreditCard, Heart, LayoutGrid, MapPin, Menu, Minus, Moon, Package, Plus, Search, ShoppingBag,
+  CreditCard, Facebook, Heart, Instagram, LayoutGrid, Mail, MapPin, Menu, MessageCircle, Minus, Moon, Package, Phone, Plus, Search, ShoppingBag,
   ShieldCheck, SlidersHorizontal, Sparkles, Sun, Trash2, X
 } from "lucide-react";
 import hero from "./assets/medzapperal-hero.png";
 import { AuthPage } from "./Auth";
 import { getMyProfile, isSupabaseConfigured, supabase } from "./lib/supabase";
 import { deleteFromImageKit, uploadToImageKit } from "./lib/imagekit";
-import { createProductWithVariants, deleteProduct, fetchAdminData, fetchCatalog, placeCodOrder, slugify, updateProductWithVariants } from "./lib/store";
+import { createProductWithVariants, deleteProduct, fetchAdminData, fetchCatalog, fetchDefaultAddress, placeCodOrder, saveDefaultAddress, slugify, updateProductWithVariants } from "./lib/store";
 import "./styles.css";
 
 const palette = {
@@ -54,6 +54,60 @@ const categoryCards = [
   ["Jackets", "Your extra layer"],
   ["Accessories", "Shift essentials"]
 ];
+
+const policyContent = {
+  terms: {
+    eyebrow:"STORE POLICIES",
+    title:"Terms and Conditions",
+    intro:"These terms explain product presentation, fabric characteristics, sizing, customization, and refund or exchange expectations for purchases from Medz Apparel.",
+    sections:[
+      ["Product Images & Color Variation","All product images displayed on our website are real and captured using high-quality cameras. Camera processing, lighting, and screen settings may cause actual colors to appear slightly different in person."],
+      ["Fabric Quality Assurance","Our fabrics have been tested and evaluated by our team for more than one year for quality and durability. Refunds or exchanges cannot be accepted solely because a buyer prefers a different fabric texture."],
+      ["Fabric Texture & Comfort","Cotton and polyester fabrics may initially feel slightly stiff because of their natural composition. They generally soften and become more comfortable with regular washing."],
+      ["Sizing & Customizations","Customers are responsible for selecting the correct size and reviewing customizations such as name or logo engraving. A variation of 0.5 to 1 inch is within standard manufacturing tolerance and is not considered an incorrect size for refund or exchange purposes."],
+      ["Design Selection","Some product photographs are provided primarily for color reference. Select the required design from the design options shown on the relevant product listing."],
+      ["Trouser Design Standardization","Regardless of styling visible in supporting images, trousers are supplied according to the standard design described on the product page."],
+      ["Product Modifications","Medz Apparel may make reasonable product modifications or improvements without prior notice when they enhance quality, construction, or performance."],
+      ["Refund & Exchange Request Timeline","Contact us promptly after delivery with your order reference and supporting photographs. Requests are reviewed according to the product condition, customization status, and reason supplied."],
+      ["Customized Items","Products made or engraved to a customer’s instructions cannot be returned for preference, sizing selection, or change-of-mind reasons unless Medz Apparel made an eligible production error."],
+      ["How to Request","Send the order reference, customer name, issue description, and clear photographs through our official support channel. Do not return an item until return instructions have been provided."],
+      ["Condition of Returned Items","Approved returns must be unworn, unwashed, unaltered, and returned with their original packaging and tags. Items showing use or customer damage may be refused."],
+      ["Eligible Reasons for Refund or Exchange","Requests may be considered for an incorrect item, verified manufacturing defect, or material difference from the confirmed order, subject to inspection."],
+      ["Alterations Instead of Refund or Exchange","Where appropriate, Medz Apparel may offer a reasonable alteration or correction instead of a full refund or replacement."],
+      ["Courier Charges","Courier costs depend on the reason for return. When an error is attributable to Medz Apparel, the approved resolution will include the applicable courier arrangement. Other approved returns may require the customer to cover delivery costs."],
+      ["Engraving Errors","For missing or incorrect name/logo spelling, placement, or color caused by Medz Apparel, the applicable engraving charge will be refunded. For a major spelling error, a corrected name tag may be provided free of charge to stitch above the incorrect engraving; the original engraving charge will not also be refunded in that case."]
+    ]
+  },
+  shipping: {
+    eyebrow:"DELIVERY INFORMATION",
+    title:"Shipping Policy",
+    intro:"We currently deliver within Pakistan. Delivery estimates begin after the order and any customization details have been confirmed.",
+    sections:[
+      ["Standard Delivery","Our standard delivery estimate is 8–12 working days, excluding Saturdays and Sundays."],
+      ["Urgent Delivery","Urgent delivery is typically 3–5 days and is subject to product, customization, and courier availability."],
+      ["Delivery Partners","Orders may be assigned to an available courier partner based on the destination, parcel type, and service availability."],
+      ["Shipment Tracking","Tracking information is shared when provided by the assigned courier. Tracking updates can take time to appear after dispatch."],
+      ["Delivery Charges","The applicable delivery charge is shown in the final checkout summary before the order is confirmed."],
+      ["Price Adjustments","Any approved change to the product, quantity, delivery method, or customization may change the final payable amount. Changes are confirmed before dispatch."],
+      ["Unforeseen Delays","Weather, public holidays, access restrictions, service interruptions, or other events outside our reasonable control may extend delivery estimates."],
+      ["Shipment Delays","If a shipment is delayed, contact us with the order reference so we can request an update from the courier. Courier timelines remain estimates rather than guaranteed delivery dates."]
+    ]
+  },
+  privacy: {
+    eyebrow:"YOUR INFORMATION",
+    title:"Privacy Policy",
+    intro:"Medz Apparel values your privacy and uses personal information only for legitimate store, delivery, support, and optional marketing purposes.",
+    sections:[
+      ["Information We Collect","We may collect your name, email address, telephone number, saved delivery address, billing details when applicable, order history, and transaction information. Card payments are currently unavailable; if introduced, payment processing will be handled through an authorized provider."],
+      ["How We Use Information","Information is used to create and secure accounts, process orders, arrange delivery, provide customer support, prevent misuse, maintain transaction records, and send promotional email only when you have opted in."],
+      ["Information Sharing","Relevant information may be shared with hosting, database, media, payment, communication, and courier providers that support the service. We may also disclose information when required by law or a valid legal request."],
+      ["Saved Delivery Details","Saving a delivery address is optional. When selected at checkout, the address is stored against the signed-in account in Supabase and protected by account-level access controls. It can be replaced by saving a newer default address."],
+      ["Security","We use reasonable technical and organizational safeguards to reduce unauthorized access, loss, or misuse. No internet-based service can guarantee absolute security."],
+      ["Your Choices","You may choose not to save delivery details and may opt out of promotional communications. Required order and legal records may be retained where necessary."],
+      ["Policy Updates","Material changes to this policy will be posted on this page. Continued use after an update is subject to the revised policy."]
+    ]
+  }
+};
 
 function App() {
   const [dark, setDark] = useState(() => localStorage.getItem("mz-theme") === "dark");
@@ -120,7 +174,9 @@ function App() {
     {page === "auth" && <AuthPage user={user} profile={profile} onDone={() => setPage("home")} onAdmin={() => setPage("admin")} onSignOut={async () => { await supabase?.auth.signOut(); setPage("home"); }}/>}
     {page === "admin" && <Admin user={user} profile={profile} authReady={authReady} onLogin={() => setPage("auth")} products={products} onCreated={loadCatalog} />}
     {page === "checkout" && <Checkout user={user} profile={profile} cart={cart} setCart={setCart} onLogin={()=>setPage("auth")} onShop={()=>goShop("All")} />}
-    <Footer goShop={goShop}/>
+    {["terms","shipping","privacy"].includes(page) && <PolicyPage policy={policyContent[page]} />}
+    {page === "contact" && <ContactPage />}
+    <Footer goShop={goShop} onNavigate={setPage}/>
     <Cart cart={cart} setCart={setCart} open={cartOpen} close={() => setCartOpen(false)} onCheckout={()=>{setCartOpen(false);setPage("checkout")}}/>
   </div>;
 }
@@ -325,8 +381,27 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
   const [placing,setPlacing]=useState(false);
   const [error,setError]=useState("");
   const [order,setOrder]=useState(null);
+  const [saveDetails,setSaveDetails]=useState(false);
+  const [savedAddressId,setSavedAddressId]=useState(null);
   const [address,setAddress]=useState({country:"Pakistan",city:"",recipient_name:profile?.full_name||user?.user_metadata?.full_name||"",complete_address:"",mobile:profile?.phone||"",secondary_mobile:""});
   useEffect(()=>{if(!address.recipient_name&&(profile?.full_name||user?.user_metadata?.full_name))setAddress(a=>({...a,recipient_name:profile?.full_name||user?.user_metadata?.full_name}))},[profile,user]);
+  useEffect(()=>{
+    if(!user?.id)return;
+    let active=true;
+    fetchDefaultAddress(user.id).then(saved=>{
+      if(!active||!saved)return;
+      setSavedAddressId(saved.id);
+      setAddress(current=>({
+        country:"Pakistan",
+        city:current.city||saved.city||"",
+        recipient_name:current.recipient_name||saved.recipient_name||"",
+        complete_address:current.complete_address||saved.complete_address||"",
+        mobile:current.mobile||saved.mobile||"",
+        secondary_mobile:current.secondary_mobile||saved.secondary_mobile||""
+      }));
+    }).catch(()=>{});
+    return()=>{active=false};
+  },[user?.id]);
   const grouped=useMemo(()=>Object.values(cart.reduce((acc,item)=>{const key=item.variantId;if(!acc[key])acc[key]={...item,quantity:0};acc[key].quantity++;return acc},{})),[cart]);
   const subtotal=grouped.reduce((sum,item)=>sum+item.price*item.quantity,0);
   const delivery=200+(50*cart.length);
@@ -337,6 +412,7 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
     const chime=prepareOrderChime();
     setPlacing(true);setError("");
     try{
+      if(saveDetails)await saveDefaultAddress({userId:user.id,address,addressId:savedAddressId});
       const result=await placeCodOrder({shippingAddress:address,items:grouped});
       setOrder(result);setCart([]);setStep("success");chime.play();
     }catch(e){chime.dispose();setError(e.message)}finally{setPlacing(false)}
@@ -361,11 +437,12 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
             <label>Secondary mobile number <small>Optional</small><input type="tel" value={address.secondary_mobile} onChange={e=>setAddress({...address,secondary_mobile:e.target.value})} placeholder="03XX XXXXXXX" pattern="(?:\\+92|0)3[0-9]{9}|^$"/></label>
             <label className="wide">Complete address *<textarea rows="4" value={address.complete_address} onChange={e=>setAddress({...address,complete_address:e.target.value})} placeholder="House or apartment, street, area and nearby landmark" required/></label>
           </div>
+          <label className="save-address-option"><input type="checkbox" checked={saveDetails} onChange={event=>setSaveDetails(event.target.checked)}/><span><b>Save these delivery details</b><small>Securely prefill this address the next time you check out.</small></span></label>
           <div className="payment-title"><h2>Payment method</h2></div>
           <div className="payment-options"><button type="button" className="payment-option disabled" disabled><CreditCard/><span><b>Bank cards</b><small>Coming soon</small></span></button><button type="button" className="payment-option selected"><Banknote/><span><b>Cash on delivery</b><small>Pay when your order arrives</small></span><Check/></button></div>
           {error&&<div className="auth-error">{error}</div>}<button className="primary checkout-next">Review order <ArrowRight size={17}/></button>
         </form>:<div className="review">
-          <div className="review-block"><div className="review-head"><h2>Delivery address</h2><button onClick={()=>setStep("details")}>Edit</button></div><b>{address.recipient_name}</b><p>{address.complete_address}<br/>{address.city}, Pakistan<br/>{address.mobile}{address.secondary_mobile&&` · ${address.secondary_mobile}`}</p></div>
+          <div className="review-block"><div className="review-head"><h2>Delivery address</h2><button onClick={()=>setStep("details")}>Edit</button></div><b>{address.recipient_name}</b><p>{address.complete_address}<br/>{address.city}, Pakistan<br/>{address.mobile}{address.secondary_mobile&&` · ${address.secondary_mobile}`}</p>{saveDetails&&<small className="save-address-note"><Check size={13}/> These details will be saved to your account.</small>}</div>
           <div className="review-block"><h2>Payment</h2><p><Banknote size={17}/> Cash on delivery</p></div>
           <div className="review-block"><h2>Items</h2>{grouped.map(item=><div className="review-item" key={item.variantId}><img src={item.image}/><div><b>{item.name}</b><span>{item.color} / {item.size} · Qty {item.quantity}</span></div><strong>{pkr(item.price*item.quantity)}</strong></div>)}</div>
           {error&&<div className="auth-error">{error}</div>}<button className="primary confirm-order" disabled={placing} onClick={confirm}>{placing?"Placing order…":"Confirm cash on delivery order"} <ArrowRight size={17}/></button>
@@ -490,8 +567,34 @@ function Admin({ user, profile, authReady, onLogin, products, onCreated }) {
   </main>;
 }
 
-function Footer({goShop}) {
-  return <footer><div className="footer-brand"><img className="brand-logo footer-logo" src="/media/medz-logo.png" alt="Medz Apparel"/><h2>MEDZAPPERAL</h2><p>Made for the shift.<br/>Designed for what matters.</p></div><div><h3>Shop</h3>{["Scrubs","Lab Coats","Jackets","Accessories"].map(x=><button key={x} onClick={()=>goShop(x)}>{x}</button>)}</div><div><h3>Help</h3><a>Size guide</a><a>Shipping & returns</a><a>Contact us</a><a>FAQ</a></div><div><h3>Follow</h3><a>Instagram</a><a>TikTok</a><a>Pinterest</a></div><div className="footer-bottom"><span>© 2026 MEDZAPPERAL</span><span>Privacy · Terms · Accessibility</span></div></footer>;
+function PolicyPage({policy}) {
+  return <main className="policy-page">
+    <section className="policy-hero"><p className="eyebrow">{policy.eyebrow}</p><h1>{policy.title}</h1><p>{policy.intro}</p><small>Last updated: July 19, 2026</small></section>
+    <div className="policy-layout"><aside><p>On this page</p>{policy.sections.map(([title],index)=><a key={title} href={`#policy-${index+1}`}>{String(index+1).padStart(2,"0")} {title}</a>)}</aside>
+    <article>{policy.sections.map(([title,content],index)=><section id={`policy-${index+1}`} key={title}><span>{String(index+1).padStart(2,"0")}</span><div><h2>{title}</h2><p>{content}</p></div></section>)}</article></div>
+  </main>;
+}
+
+function ContactPage() {
+  return <main className="contact-page">
+    <div className="contact-shell">
+      <section className="contact-intro"><p className="eyebrow">CONTACT MEDZ APPAREL</p><h1>We’re here to help.</h1><p>Questions about an order, sizing, customization, or delivery? Reach our team through any of the channels below.</p></section>
+      <section className="contact-grid">
+        <a className="contact-card" href="tel:+923410875629"><Phone/><span><small>Call us</small><strong>+92 341 0875629</strong></span></a>
+        <a className="contact-card" href="mailto:medzapparel7@gmail.com"><Mail/><span><small>Email us</small><strong>medzapparel7@gmail.com</strong></span></a>
+        <div className="contact-card"><MapPin/><span><small>Based in</small><strong>Hyderabad, Sindh, Pakistan</strong></span></div>
+      </section>
+      <section className="contact-social-panel"><div><p className="eyebrow">SOCIAL & MESSAGING</p><h2>Follow the collection or message us directly.</h2></div><div className="contact-socials">
+        <a className="contact-social" href="https://www.facebook.com/profile.php?id=100093355088786" target="_blank" rel="noreferrer"><Facebook/> Facebook</a>
+        <a className="contact-social" href="https://www.instagram.com/medz_apparel/" target="_blank" rel="noreferrer"><Instagram/> Instagram</a>
+        <a className="contact-social" href="https://wa.me/message/AMSQ2CXELSP5C1" target="_blank" rel="noreferrer"><MessageCircle/> WhatsApp</a>
+      </div></section>
+    </div>
+  </main>;
+}
+
+function Footer({goShop,onNavigate}) {
+  return <footer><div className="footer-brand"><img className="brand-logo footer-logo" src="/media/medz-logo.png" alt="Medz Apparel"/><h2>MEDZAPPERAL</h2><p>Made for the shift.<br/>Designed for what matters.</p></div><div><h3>Shop</h3>{["Scrubs","Lab Coats","Jackets","Accessories"].map(x=><button key={x} onClick={()=>goShop(x)}>{x}</button>)}</div><div><h3>Help</h3><button onClick={()=>onNavigate("terms")}>Terms & exchanges</button><button onClick={()=>onNavigate("shipping")}>Shipping policy</button><button onClick={()=>onNavigate("privacy")}>Privacy policy</button><button onClick={()=>onNavigate("contact")}>Contact us</button></div><div><h3>Follow</h3><a href="https://www.facebook.com/profile.php?id=100093355088786" target="_blank" rel="noreferrer">Facebook</a><a href="https://www.instagram.com/medz_apparel/" target="_blank" rel="noreferrer">Instagram</a><a href="https://wa.me/message/AMSQ2CXELSP5C1" target="_blank" rel="noreferrer">WhatsApp</a></div><div className="footer-bottom"><span>© 2026 MEDZAPPERAL</span><span><button onClick={()=>onNavigate("privacy")}>Privacy</button> · <button onClick={()=>onNavigate("terms")}>Terms</button> · Accessibility</span></div></footer>;
 }
 
 createRoot(document.getElementById("root")).render(<App/>);

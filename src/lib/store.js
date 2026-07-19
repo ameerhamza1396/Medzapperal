@@ -85,6 +85,34 @@ export async function placeCodOrder({ shippingAddress, items }) {
   return Array.isArray(data) ? data[0] : data;
 }
 
+export async function fetchDefaultAddress(userId) {
+  if (!supabase || !userId) return null;
+  const { data, error } = await supabase
+    .from("addresses")
+    .select("id,full_address")
+    .eq("user_id", userId)
+    .eq("is_default", true)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? { id: data.id, ...data.full_address } : null;
+}
+
+export async function saveDefaultAddress({ userId, address, addressId }) {
+  if (!supabase || !userId) throw new Error("Please sign in to save an address.");
+  const { error: clearError } = await supabase
+    .from("addresses")
+    .update({ is_default: false })
+    .eq("user_id", userId);
+  if (clearError) throw clearError;
+  const row = { user_id: userId, label: "Default delivery address", full_address: address, is_default: true };
+  const result = addressId
+    ? await supabase.from("addresses").update(row).eq("id", addressId).eq("user_id", userId)
+    : await supabase.from("addresses").insert(row);
+  if (result.error) throw result.error;
+}
+
 export async function fetchAdminData() {
   if (!supabase) return { categories: [], colors: [], clothTypes: [], orders: [] };
   const [categories, colors, clothTypes, orders] = await Promise.all([
