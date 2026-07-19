@@ -1,8 +1,20 @@
-import React, { useState } from "react";
-import { ArrowRight, Check, KeyRound, LoaderCircle, LogOut, Mail, ShieldCheck, UserRound } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { ArrowRight, CalendarDays, Check, KeyRound, LoaderCircle, LogOut, Mail, MapPin, Package, Phone, RefreshCw, ShieldCheck, Truck, UserRound, XCircle } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
+import { cancelPendingOrder, fetchCustomerAccount } from "./lib/store";
 
-export function AuthPage({ user, profile, onDone, onSignOut, onAdmin }) {
+const pkr = value => new Intl.NumberFormat("en-PK",{style:"currency",currency:"PKR",maximumFractionDigits:0}).format(Number(value)||0);
+const statusCopy = {
+  pending: ["Order received","We have received your order and will begin processing it shortly."],
+  paid: ["Payment confirmed","Your payment has been confirmed."],
+  processing: ["Processing","Your pieces are being prepared for dispatch."],
+  shipped: ["Shipped / delivering","Your order is with the delivery partner."],
+  delivered: ["Delivered","Your order has been delivered."],
+  cancelled: ["Cancelled","This order was cancelled."],
+  refunded: ["Refunded","The refund for this order has been processed."]
+};
+
+export function AuthPage({ user, profile, onDone, onSignOut, onAdmin, onContact, onCheckout }) {
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -12,6 +24,20 @@ export function AuthPage({ user, profile, onDone, onSignOut, onAdmin }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [accountData, setAccountData] = useState({ orders: [], addresses: [] });
+  const [accountLoading, setAccountLoading] = useState(false);
+  const [accountError, setAccountError] = useState("");
+  const [cancelling, setCancelling] = useState("");
+
+  const loadAccount = async () => {
+    if (!user) return;
+    setAccountLoading(true); setAccountError("");
+    try { setAccountData(await fetchCustomerAccount(user.id)); }
+    catch (e) { setAccountError(e.message); }
+    finally { setAccountLoading(false); }
+  };
+
+  useEffect(() => { loadAccount(); }, [user?.id]);
 
   const run = async (action) => {
     setLoading(true); setError(""); setMessage("");
@@ -65,19 +91,56 @@ export function AuthPage({ user, profile, onDone, onSignOut, onAdmin }) {
     setMessage("A new verification code has been sent.");
   });
 
-  if (user) return <main className="auth-page">
-    <section className="account-card">
-      <div className="account-avatar"><UserRound /></div>
-      <p className="eyebrow">YOUR ACCOUNT</p>
-      <h1>{profile?.full_name || user.user_metadata?.full_name || "Welcome back"}</h1>
-      <p>{user.email}</p>
-      <div className="account-status"><ShieldCheck size={18}/><span>Email verified</span><Check size={15}/></div>
-      <div className="account-status"><KeyRound size={18}/><span>Account role</span><b>{profile?.role || "customer"}</b></div>
-      <button className="primary" onClick={onDone}>Continue shopping <ArrowRight size={17}/></button>
-      {["admin","staff"].includes(profile?.role) && <button className="primary admin-account-button" onClick={onAdmin}>Open store admin <ShieldCheck size={17}/></button>}
-      <button className="auth-link" onClick={onSignOut}><LogOut size={15}/> Sign out</button>
-    </section>
-  </main>;
+  const cancelOrder = async orderId => {
+    if (!window.confirm("Cancel this order? This cannot be undone.")) return;
+    setCancelling(orderId); setAccountError("");
+    try { await cancelPendingOrder(orderId); await loadAccount(); }
+    catch (e) { setAccountError(e.message); }
+    finally { setCancelling(""); }
+  };
+
+  if (user) {
+    const joined = new Date(user.created_at).toLocaleDateString("en-PK",{day:"numeric",month:"long",year:"numeric"});
+    const address = accountData.addresses.find(item=>item.is_default) || accountData.addresses[0];
+    return <main className="profile-page">
+      <section className="profile-hero">
+        <div className="account-avatar"><UserRound /></div>
+        <div><p className="eyebrow">YOUR MEDZ ACCOUNT</p><h1>{profile?.full_name || user.user_metadata?.full_name || "Welcome back"}</h1><p>{user.email}</p></div>
+        <button className="secondary" onClick={onDone}>Continue shopping <ArrowRight size={16}/></button>
+      </section>
+
+      <div className="profile-layout">
+        <section className="profile-main">
+          <div className="profile-section-head"><div><p className="eyebrow">ORDER HISTORY</p><h2>Your orders</h2></div><button className="icon-btn" aria-label="Refresh orders" onClick={loadAccount}><RefreshCw size={17}/></button></div>
+          {accountLoading ? <div className="profile-empty"><LoaderCircle className="spin"/> Loading your account…</div>
+          : accountData.orders.length ? <div className="customer-orders">{accountData.orders.map(order => {
+            const [label,description] = statusCopy[order.status] || [order.status,"Your order status was updated."];
+            return <article className="customer-order" key={order.id}>
+              <div className="customer-order-head"><div><small>ORDER #{order.id.slice(0,8).toUpperCase()}</small><strong>{new Date(order.created_at).toLocaleDateString("en-PK",{day:"numeric",month:"short",year:"numeric"})}</strong></div><span className={`order-status ${order.status}`}>{label}</span></div>
+              <div className="order-progress"><Package size={18}/><div><b>{label}</b><p>{description}</p>{order.customer_message&&<p className="customer-order-message">“{order.customer_message}”</p>}</div><strong>{pkr(order.total_amount)}</strong></div>
+              {(order.order_items || []).map(item => {
+                const variant=item.product_variants; const product=variant?.products; const image=[...(product?.product_images||[])].sort((a,b)=>a.sort_order-b.sort_order)[0]?.url;
+                return <div className="account-order-item" key={item.id}>{image&&<img src={image} alt=""/>}<div><b>{product?.name || "Medz Apparel item"}</b><span>{[variant?.size,variant?.colors?.name].filter(Boolean).join(" · ")} · Qty {item.quantity}</span></div><strong>{pkr(Number(item.unit_price)*item.quantity)}</strong></div>;
+              })}
+              <div className="order-actions">{order.status === "pending"
+                ? <button className="danger-link" disabled={cancelling===order.id} onClick={()=>cancelOrder(order.id)}>{cancelling===order.id?<LoaderCircle className="spin" size={15}/>:<XCircle size={15}/>} Cancel order</button>
+                : !["cancelled","refunded","delivered"].includes(order.status) && <button onClick={onContact}><Phone size={15}/> Contact us to request cancellation</button>}
+                <span>Last updated {new Date(order.updated_at).toLocaleDateString("en-PK")}</span>
+              </div>
+            </article>;
+          })}</div>
+          : <div className="profile-empty"><Package/><h3>No orders yet</h3><p>Your order history will appear here after checkout.</p><button className="primary" onClick={onDone}>Start shopping</button></div>}
+        </section>
+
+        <aside className="profile-sidebar">
+          {accountError && <div className="auth-error">{accountError}</div>}
+          <section><p className="eyebrow">SAVED SHIPPING</p><h2>Delivery details</h2>{address ? <div className="saved-address"><MapPin/><div><b>{address.full_address?.recipient_name}</b><p>{address.full_address?.complete_address}, {address.full_address?.city}, Pakistan</p><span>{address.full_address?.mobile}{address.full_address?.secondary_mobile ? ` · ${address.full_address.secondary_mobile}` : ""}</span></div></div> : <p className="sidebar-muted">No saved delivery address yet.</p>}<button className="text-link" onClick={onCheckout}>{address ? "Review at checkout" : "Add at checkout"} <ArrowRight size={14}/></button></section>
+          <section><p className="eyebrow">ACCOUNT DETAILS</p><h2>Membership</h2><div className="detail-row"><CalendarDays/><span>Joined on</span><b>{joined}</b></div><div className="detail-row"><ShieldCheck/><span>Email</span><b>Verified <Check size={13}/></b></div><div className="detail-row"><KeyRound/><span>Account type</span><b>{profile?.role || "Customer"}</b></div>{["admin","staff"].includes(profile?.role) && <button className="primary admin-account-button" onClick={onAdmin}>Open store admin</button>}</section>
+          <section className="profile-help"><p className="eyebrow">NEED HELP?</p><h2>We’re here for you.</h2><button className="secondary" onClick={onContact}><Phone size={15}/> Contact Medz Apparel</button><button className="auth-link" onClick={onSignOut}><LogOut size={15}/> Log out</button></section>
+        </aside>
+      </div>
+    </main>;
+  }
 
   return <main className="auth-page">
     <section className="auth-card">

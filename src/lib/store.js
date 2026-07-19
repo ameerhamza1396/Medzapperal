@@ -113,16 +113,63 @@ export async function saveDefaultAddress({ userId, address, addressId }) {
   if (result.error) throw result.error;
 }
 
+export async function fetchCustomerAccount(userId) {
+  if (!supabase || !userId) return { orders: [], addresses: [] };
+  const [orders, addresses] = await Promise.all([
+    supabase
+      .from("orders")
+      .select(`
+        id,status,total_amount,shipping_address,internal_notes,created_at,updated_at,
+        order_items(id,quantity,unit_price,product_variants(size,colors(name),products(name,product_images(url,sort_order))))
+      `)
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("addresses")
+      .select("id,label,full_address,is_default,created_at")
+      .eq("user_id", userId)
+      .order("is_default", { ascending: false })
+      .order("created_at", { ascending: false })
+  ]);
+  if (orders.error) throw orders.error;
+  if (addresses.error) throw addresses.error;
+  return {
+    orders: (orders.data || []).map(order => ({ ...order, customer_message: order.internal_notes })),
+    addresses: addresses.data || []
+  };
+}
+
+export async function cancelPendingOrder(orderId) {
+  if (!supabase) throw new Error("Supabase is not configured.");
+  const { error } = await supabase.rpc("cancel_pending_order", { p_order_id: orderId });
+  if (error) throw error;
+}
+
+export async function updateOrderStatus({ orderId, status, customerMessage }) {
+  if (!supabase) throw new Error("Supabase is not configured.");
+  const { error } = await supabase.rpc("admin_update_order", {
+    p_order_id: orderId,
+    p_status: status,
+    p_customer_message: customerMessage?.trim() || null
+  });
+  if (error) throw error;
+}
+
 export async function fetchAdminData() {
   if (!supabase) return { categories: [], colors: [], clothTypes: [], orders: [] };
   const [categories, colors, clothTypes, orders] = await Promise.all([
     supabase.from("categories").select("id,name,slug").order("sort_order"),
     supabase.from("colors").select("id,name,hex").order("name"),
     supabase.from("cloth_types").select("id,name").order("name"),
-    supabase.from("orders").select("id,status,total_amount,created_at").order("created_at",{ascending:false}).limit(10)
+    supabase.from("orders").select("id,status,total_amount,internal_notes,created_at,updated_at").order("created_at",{ascending:false}).limit(10)
   ]);
   for (const result of [categories, colors, clothTypes, orders]) if (result.error) throw result.error;
-  return { categories: categories.data, colors: colors.data, clothTypes: clothTypes.data, orders: orders.data };
+  return {
+    categories: categories.data,
+    colors: colors.data,
+    clothTypes: clothTypes.data,
+    orders: orders.data.map(order => ({ ...order, customer_message: order.internal_notes }))
+  };
 }
 
 export function slugify(value) {

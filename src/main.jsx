@@ -9,7 +9,7 @@ import hero from "./assets/medzapperal-hero.png";
 import { AuthPage } from "./Auth";
 import { getMyProfile, isSupabaseConfigured, supabase } from "./lib/supabase";
 import { deleteFromImageKit, uploadToImageKit } from "./lib/imagekit";
-import { createProductWithVariants, deleteProduct, fetchAdminData, fetchCatalog, fetchDefaultAddress, placeCodOrder, saveDefaultAddress, slugify, updateProductWithVariants } from "./lib/store";
+import { createProductWithVariants, deleteProduct, fetchAdminData, fetchCatalog, fetchDefaultAddress, placeCodOrder, saveDefaultAddress, slugify, updateOrderStatus, updateProductWithVariants } from "./lib/store";
 import "./styles.css";
 
 const palette = {
@@ -171,7 +171,7 @@ function App() {
     {page === "home" && <Home {...{goShop,openProduct,add,products,catalogLoading}} />}
     {page === "shop" && <Shop initialQuery={query} openProduct={openProduct} add={add} products={products} loading={catalogLoading} error={catalogError}/>}
     {page === "product" && selected && <Product product={selected} add={add} openProduct={openProduct} products={products}/>}
-    {page === "auth" && <AuthPage user={user} profile={profile} onDone={() => setPage("home")} onAdmin={() => setPage("admin")} onSignOut={async () => { await supabase?.auth.signOut(); setPage("home"); }}/>}
+    {page === "auth" && <AuthPage user={user} profile={profile} onDone={() => setPage("home")} onAdmin={() => setPage("admin")} onContact={() => setPage("contact")} onCheckout={() => setPage("checkout")} onSignOut={async () => { await supabase?.auth.signOut(); setPage("home"); }}/>}
     {page === "admin" && <Admin user={user} profile={profile} authReady={authReady} onLogin={() => setPage("auth")} products={products} onCreated={loadCatalog} />}
     {page === "checkout" && <Checkout user={user} profile={profile} cart={cart} setCart={setCart} onLogin={()=>setPage("auth")} onShop={()=>goShop("All")} />}
     {["terms","shipping","privacy"].includes(page) && <PolicyPage policy={policyContent[page]} />}
@@ -453,6 +453,38 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
   </main>;
 }
 
+const adminOrderStatuses = [
+  ["pending","Received"],
+  ["processing","Processing"],
+  ["shipped","Shipping"],
+  ["cancelled","Declined"]
+];
+
+function AdminOrderEditor({order,onUpdated}) {
+  const [status,setStatus] = useState(order.status);
+  const [message,setMessage] = useState(order.customer_message || "");
+  const [saving,setSaving] = useState(false);
+  const [feedback,setFeedback] = useState("");
+  const save = async () => {
+    setSaving(true); setFeedback("");
+    try {
+      await updateOrderStatus({orderId:order.id,status,customerMessage:message});
+      setFeedback("Updated");
+      await onUpdated();
+    } catch (error) { setFeedback(error.message); }
+    finally { setSaving(false); }
+  };
+  return <article className="admin-order-card">
+    <div className="admin-order-summary"><div><small>ORDER</small><b>#{order.id.slice(0,8).toUpperCase()}</b></div><div><small>RECEIVED</small><span>{new Date(order.created_at).toLocaleDateString("en-PK")}</span></div><strong>{pkr(order.total_amount)}</strong></div>
+    <div className="admin-order-controls">
+      <label>Status<select value={status} disabled={["cancelled","refunded"].includes(order.status)} onChange={event=>setStatus(event.target.value)}>{!adminOrderStatuses.some(([value])=>value===status)&&<option value={status}>{status}</option>}{adminOrderStatuses.map(([value,label])=><option value={value} key={value}>{label}</option>)}</select></label>
+      <label className="admin-order-message">Custom message <small>{message.length}/500</small><textarea rows="2" maxLength="500" value={message} onChange={event=>setMessage(event.target.value)} placeholder="Optional update visible to the customer"/></label>
+      <button className="primary" disabled={saving} onClick={save}>{saving?"Saving…":"Save update"}</button>
+    </div>
+    {feedback && <p className={feedback==="Updated"?"admin-order-success":"admin-order-error"}>{feedback}</p>}
+  </article>;
+}
+
 function Admin({ user, profile, authReady, onLogin, products, onCreated }) {
   const [uploading,setUploading] = useState(false);
   const [uploadResult,setUploadResult] = useState(null);
@@ -466,9 +498,10 @@ function Admin({ user, profile, authReady, onLogin, products, onCreated }) {
   const [formSuccess,setFormSuccess] = useState("");
   const [form,setForm] = useState({name:"",description:"",category_id:"",cloth_type_id:"",gender:"unisex",base_price:"",is_featured:false});
   const [variants,setVariants] = useState([{color_id:"",size:"M",sku:"",stock_quantity:"0",price_override:""}]);
+  const loadAdminData = () => fetchAdminData().then(setAdminData).catch(error=>setFormError(error.message));
   useEffect(() => {
     if (user && ["admin","staff"].includes(profile?.role)) {
-      fetchAdminData().then(setAdminData).catch(error=>setFormError(error.message));
+      loadAdminData();
     }
   }, [user,profile]);
   const uploadImage = async (event) => {
@@ -535,6 +568,7 @@ function Admin({ user, profile, authReady, onLogin, products, onCreated }) {
   const metrics=[["Catalog products",String(products.length),"Live"],["Recorded revenue",pkr(revenue),"From orders"],["Pending orders",String(adminData.orders.filter(o=>o.status==="pending").length),"Needs review"],["Low stock",String(products.filter(p=>p.stock<10).length),"Products"]];
   return <main className="admin">
     <div className="admin-title"><div><p className="eyebrow">ADMIN / OVERVIEW</p><h1>Good morning, {profile?.full_name?.split(" ")[0] || "Admin"}.</h1><p>Manage the live Supabase catalog and ImageKit media.</p></div><button className="primary" onClick={()=>showForm?(resetEditor(),setShowForm(false)):openNew()}>{showForm?<X size={17}/>:<Plus size={17}/>} {showForm?"Close form":"Add product"}</button></div>
+    {formError && !showForm && <div className="auth-error admin-page-error">{formError}</div>}
     {showForm && <form className="product-editor" onSubmit={submitProduct}>
       <div className="editor-heading"><div><p className="eyebrow">{editingId?"EDIT CATALOG ITEM":"NEW CATALOG ITEM"}</p><h2>{editingId?"Update product":"Product details"}</h2></div><span>All fields marked * are required</span></div>
       <div className="editor-grid">
@@ -561,8 +595,8 @@ function Admin({ user, profile, authReady, onLogin, products, onCreated }) {
       <div className="editor-actions"><button type="button" onClick={()=>{resetEditor();setShowForm(false)}}>Cancel</button><button className="primary" disabled={saving||uploading}>{saving?"Saving…":editingId?"Save changes":"Publish product"} <ArrowRight size={16}/></button></div>
     </form>}
     <div className="metrics">{metrics.map((m,i)=><div key={m[0]}><span>{i===0?<BarChart3/>:i===1?<ShoppingBag/>:i===2?<Package/>:<Sparkles/>}</span><p>{m[0]}</p><h2>{m[1]}</h2><small>{m[2]}</small></div>)}</div>
-    <div className="admin-grid"><section><div className="panel-head"><h2>Recent orders</h2></div>{adminData.orders.length?<div className="order-table">{adminData.orders.map(o=><div key={o.id}><b>#{o.id.slice(0,8)}</b><span>{new Date(o.created_at).toLocaleDateString()}</span><strong>{pkr(o.total_amount)}</strong><em className={o.status}>{o.status}</em></div>)}</div>:<div className="admin-empty">No orders yet.</div>}</section>
-    <section><div className="panel-head"><h2>Inventory alerts</h2></div>{products.filter(p=>p.stock<10).length?products.filter(p=>p.stock<10).map(p=><div className="stock-row" key={p.id}>{p.image&&<img src={p.image}/>}<div><b>{p.name}</b><span>{p.colors.join(", ")}</span></div><strong>{p.stock} left</strong></div>):<div className="admin-empty">No low-stock products.</div>}</section></div>
+    <section className="admin-orders-panel"><div className="panel-head"><div><p className="eyebrow">FULFILMENT</p><h2>Manage received orders</h2></div><span>{adminData.orders.length} recent</span></div>{adminData.orders.length?<div className="admin-order-list">{adminData.orders.map(order=><AdminOrderEditor key={order.id} order={order} onUpdated={loadAdminData}/>)}</div>:<div className="admin-empty">No orders yet.</div>}</section>
+    <section className="inventory-panel"><div className="panel-head"><h2>Inventory alerts</h2></div>{products.filter(p=>p.stock<10).length?products.filter(p=>p.stock<10).map(p=><div className="stock-row" key={p.id}>{p.image&&<img src={p.image}/>}<div><b>{p.name}</b><span>{p.colors.join(", ")}</span></div><strong>{p.stock} left</strong></div>):<div className="admin-empty">No low-stock products.</div>}</section>
     <section className="admin-products"><div className="panel-head"><h2>Live products</h2><span>{products.length} total</span></div>{products.length?<div className="product-table product-actions-table"><div className="table-header"><span>Product</span><span>Category</span><span>Stock</span><span>Price</span><span>Status</span><span>Actions</span></div>{products.map(p=><div key={p.id}><span>{p.image&&<img src={p.image}/>}<b>{p.name}</b></span><span>{p.category}</span><span>{p.stock}</span><span>{pkr(p.price)}</span><span className="active"><i/> Active</span><span className="row-actions"><button onClick={()=>openEdit(p)}>Edit</button><button onClick={()=>removeProduct(p)}><Trash2 size={14}/> Delete</button></span></div>)}</div>:<div className="admin-empty large">No products yet. Use “Add product” to publish your first item.</div>}</section>
   </main>;
 }
