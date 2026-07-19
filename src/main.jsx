@@ -127,7 +127,9 @@ function App() {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
     localStorage.setItem("mz-theme", dark ? "dark" : "light");
   }, [dark]);
-  useEffect(() => window.scrollTo({ top: 0, behavior: "smooth" }), [page]);
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [page]);
   const loadCatalog = async () => {
     setCatalogLoading(true); setCatalogError("");
     try { setProducts(await fetchCatalog()); }
