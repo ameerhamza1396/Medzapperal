@@ -343,3 +343,16 @@ a.contact-card:hover,.contact-social:hover{transform:translateY(-3px);border-col
 .colour-signoff span{font-size:10px;letter-spacing:.23em;color:#746657}
 @media(max-width:900px){.colour-grid{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:560px){.colour-page{padding-inline:12px}.colour-grid{grid-template-columns:repeat(2,1fr)}.colour-hero h1{font-size:52px}.colour-grid strong{font-size:11px}.colour-signoff span{letter-spacing:.12em}}
+
+/* Multi-image product editor */
+.product-images-editor{border-bottom:0}
+.admin-image-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(145px,1fr));gap:12px;margin:14px 0 24px}
+.admin-image-grid article{position:relative;padding:7px;border:1px solid var(--line);background:var(--bg)}
+.admin-image-grid article.main{padding:6px;border:2px solid var(--accent)}
+.admin-image-grid img{display:block;width:100%;aspect-ratio:4/5;object-fit:cover}
+.admin-image-grid article>span{display:block;margin:8px 2px 5px;font-size:10px;font-weight:600;color:var(--muted)}
+.admin-image-grid article.main>span{color:var(--accent)}
+.admin-image-grid article>div{display:flex;justify-content:space-between;gap:5px;min-height:30px}
+.admin-image-grid button{display:flex;align-items:center;gap:4px;padding:6px;font-size:9px;color:var(--muted)}
+.admin-image-grid button:hover{color:var(--accent)}
+.admin-image-grid button:last-child{margin-left:auto;color:#b45345}

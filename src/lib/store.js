@@ -63,7 +63,17 @@ export async function fetchStorefrontContent() {
   };
 }
 
-export async function updateProductWithVariants({ id, product, variants, image }) {
+async function replaceProductImages(productId, images) {
+  const { error: deleteError } = await supabase.from("product_images").delete().eq("product_id", productId);
+  if (deleteError) throw deleteError;
+  if (!images?.length) return;
+  const { error } = await supabase.from("product_images").insert(images.map((image,index)=>({
+    product_id:productId,url:image.url,file_id:image.fileId,sort_order:index
+  })));
+  if (error) throw error;
+}
+
+export async function updateProductWithVariants({ id, product, variants, images }) {
   const { error: productError } = await supabase.from("products").update(product).eq("id", id);
   if (productError) throw productError;
   const { data: existing, error: existingError } = await supabase
@@ -87,14 +97,7 @@ export async function updateProductWithVariants({ id, product, variants, image }
     const { error } = await supabase.from("product_variants").update({is_active:false,stock_quantity:0}).in("id",retiredIds);
     if (error) throw error;
   }
-  if (image) {
-    const { error: imageDeleteError } = await supabase.from("product_images").delete().eq("product_id", id);
-    if (imageDeleteError) throw imageDeleteError;
-    const { error: imageError } = await supabase.from("product_images").insert({
-      product_id: id, url: image.url, file_id: image.fileId, sort_order: 0
-    });
-    if (imageError) throw imageError;
-  }
+  await replaceProductImages(id,images);
 }
 
 export async function deleteProduct(id) {
@@ -213,7 +216,7 @@ export function slugify(value) {
   return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 }
 
-export async function createProductWithVariants({ product, variants, image }) {
+export async function createProductWithVariants({ product, variants, images }) {
   const { data: created, error: productError } = await supabase
     .from("products")
     .insert(product)
@@ -226,15 +229,7 @@ export async function createProductWithVariants({ product, variants, image }) {
     const rows = variants.map(v => ({ ...v, product_id: productId }));
     const { error: variantsError } = await supabase.from("product_variants").insert(rows);
     if (variantsError) throw variantsError;
-    if (image) {
-      const { error: imageError } = await supabase.from("product_images").insert({
-        product_id: productId,
-        url: image.url,
-        file_id: image.fileId,
-        sort_order: 0
-      });
-      if (imageError) throw imageError;
-    }
+    await replaceProductImages(productId,images);
     return productId;
   } catch (error) {
     await supabase.from("products").delete().eq("id", productId);

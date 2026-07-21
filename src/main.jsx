@@ -454,7 +454,7 @@ function Product({product,add,openProduct,products}) {
   return <main className="product-page">
     <button className="back" onClick={()=>history.back()}><ArrowLeft size={16}/> Back to collection</button>
     <div className="product-layout">
-      <div className="product-gallery-wrap"><div className="gallery"><img src={colourBased?design:product.image} alt={product.name}/><div className="gallery-count">{colourBased?`${galleryImages.findIndex(item=>item.url===design)+1} / ${galleryImages.length}`:"01"}</div></div>{colourBased&&<div className="design-gallery" aria-label="Choose a design">{galleryImages.slice(0,8).map((image,index)=><button className={design===image.url?"selected":""} key={image.id} onClick={()=>setDesign(image.url)}><img src={image.url} alt={`Design ${index+1}`}/><span>{index+1}</span></button>)}</div>}</div>
+      <div className="product-gallery-wrap"><div className="gallery"><img src={design||product.image} alt={product.name}/><div className="gallery-count">{String(Math.max(1,galleryImages.findIndex(item=>item.url===design)+1)).padStart(2,"0")} / {String(galleryImages.length).padStart(2,"0")}</div></div>{galleryImages.length>1&&<div className="design-gallery" aria-label={colourBased?"Choose a design":"Product gallery"}>{galleryImages.slice(0,8).map((image,index)=><button className={design===image.url?"selected":""} key={image.id} onClick={()=>setDesign(image.url)}><img src={image.url} alt={`${product.name} view ${index+1}`}/><span>{index+1}</span></button>)}</div>}</div>
       <div className="product-info">
         <p className="eyebrow">{product.category} · {product.gender}</p><h1>{product.name}</h1><p className="price">{pkr(product.price)}</p>
         <p className="description">Polished enough for rounds, comfortable enough for the longest shift. Crafted in our signature {product.fabric.toLowerCase()} fabric with a clean, easy fit and thoughtfully placed utility.</p>
@@ -607,12 +607,12 @@ function AdminOrderEditor({order,onUpdated}) {
 
 function Admin({ user, profile, authReady, onLogin, products, onCreated }) {
   const [uploading,setUploading] = useState(false);
-  const [uploadResult,setUploadResult] = useState(null);
+  const [productImages,setProductImages] = useState([]);
+  const [removedImageFileIds,setRemovedImageFileIds] = useState([]);
   const [uploadError,setUploadError] = useState("");
   const [adminData,setAdminData] = useState({categories:[],colors:[],clothTypes:[],orders:[]});
   const [showForm,setShowForm] = useState(false);
   const [editingId,setEditingId] = useState(null);
-  const [existingImage,setExistingImage] = useState(null);
   const [saving,setSaving] = useState(false);
   const [formError,setFormError] = useState("");
   const [formSuccess,setFormSuccess] = useState("");
@@ -628,27 +628,40 @@ function Admin({ user, profile, authReady, onLogin, products, onCreated }) {
     }
   }, [user,profile]);
   const uploadImage = async (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setUploading(true); setUploadError(""); setUploadResult(null);
-    try { setUploadResult(await uploadToImageKit(file)); }
+    const files = [...(event.target.files || [])];
+    if (!files.length) return;
+    if (productImages.length + files.length > 8) { setUploadError("A product can have up to 8 images."); event.target.value=""; return; }
+    setUploading(true); setUploadError("");
+    try {
+      const uploaded=[];
+      for (const file of files) uploaded.push({...await uploadToImageKit(file),isNew:true});
+      setProductImages(current=>[...current,...uploaded]);
+    }
     catch (error) { setUploadError(error.message); }
     finally { setUploading(false); event.target.value = ""; }
   };
+  const makeMainImage = index => setProductImages(current=>[current[index],...current.filter((_,itemIndex)=>itemIndex!==index)]);
+  const removeEditorImage = index => setProductImages(current=>{
+    const removed=current[index];
+    if (removed?.fileId) setRemovedImageFileIds(ids=>[...ids,removed.fileId]);
+    return current.filter((_,itemIndex)=>itemIndex!==index);
+  });
   const resetEditor = () => {
-    setEditingId(null); setExistingImage(null); setUploadResult(null); setUploadError(""); setFormError(""); setFormSuccess("");
+    setEditingId(null); setProductImages([]); setRemovedImageFileIds([]); setUploadError(""); setFormError(""); setFormSuccess("");
     setForm({name:"",description:"",category_id:"",cloth_type_id:"",gender:"unisex",product_mode:"style",base_price:"",is_featured:false});
     setSelectedColors([]); setSizes("XS, S, M, L, XL"); setVariantDefaults({stock_quantity:"0",price_override:""}); setExistingVariants([]);
   };
   const openNew = () => { resetEditor(); setShowForm(true); };
   const openEdit = product => {
-    setEditingId(product.id); setExistingImage({url:product.originalImage,fileId:product.imageFileId});
+    setEditingId(product.id);
+    setProductImages(product.images.map(image=>({url:image.originalUrl||image.url,fileId:image.fileId,thumbnailUrl:image.url,isNew:false})));
+    setRemovedImageFileIds([]);
     setForm({name:product.name,description:product.description||"",category_id:product.categoryId||"",cloth_type_id:product.clothTypeId||"",gender:product.gender.toLowerCase(),product_mode:product.productMode||"style",base_price:String(product.price),is_featured:product.isFeatured});
     setExistingVariants(product.variants);
     setSelectedColors([...new Set(product.variants.map(v=>v.colors?.id).filter(Boolean))]);
     setSizes([...new Set(product.variants.map(v=>v.size).filter(Boolean))].join(", "));
     setVariantDefaults({stock_quantity:String(product.variants[0]?.stock_quantity??0),price_override:product.variants[0]?.price_override==null?"":String(product.variants[0].price_override)});
-    setUploadResult(null); setFormError(""); setFormSuccess(""); setShowForm(true); window.scrollTo({top:0,behavior:"smooth"});
+    setFormError(""); setFormSuccess(""); setShowForm(true); window.scrollTo({top:0,behavior:"smooth"});
   };
   const removeProduct = async product => {
     if (!window.confirm(`Remove “${product.name}” from the store? Existing orders will be preserved.`)) return;
@@ -661,7 +674,7 @@ function Admin({ user, profile, authReady, onLogin, products, onCreated }) {
   const submitProduct = async (event) => {
     event.preventDefault(); setSaving(true); setFormError(""); setFormSuccess("");
     try {
-      if (!uploadResult && !existingImage?.url) throw new Error("Upload at least one product image.");
+      if (!productImages.length) throw new Error("Upload at least one product image.");
       const sizeOptions = [...new Set(sizes.split(",").map(value=>value.trim()).filter(Boolean))];
       if (!selectedColors.length) throw new Error("Select at least one colour.");
       if (!sizeOptions.length) throw new Error("Enter at least one size.");
@@ -683,12 +696,12 @@ function Admin({ user, profile, authReady, onLogin, products, onCreated }) {
           base_price: Number(form.base_price), is_active: true, is_featured: form.is_featured
         },
         variants: generatedVariants,
-        image: uploadResult
+        images: productImages.map(image=>({url:image.url,fileId:image.fileId}))
       };
       if (editingId) {
         await updateProductWithVariants({id:editingId,...payload});
-        if (uploadResult && existingImage?.fileId) deleteFromImageKit(existingImage.fileId).catch(()=>{});
       } else await createProductWithVariants(payload);
+      removedImageFileIds.forEach(fileId=>deleteFromImageKit(fileId).catch(()=>{}));
       setFormSuccess(editingId ? "Product updated successfully." : "Product published successfully.");
       await onCreated();
       if (editingId) setTimeout(()=>{resetEditor();setShowForm(false)},700);
@@ -714,7 +727,8 @@ function Admin({ user, profile, authReady, onLogin, products, onCreated }) {
         <label className="check-label"><input type="checkbox" checked={form.is_featured} onChange={e=>setForm({...form,is_featured:e.target.checked})}/> Feature on homepage</label>
         <label className="editor-wide">Description<textarea rows="4" value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
       </div>
-      <div className="editor-section"><div><h3>Product image *</h3><p>JPEG, PNG, WebP, or AVIF. Uploaded securely to ImageKit.</p></div><label className="primary upload-button">{uploading?"Uploading…":uploadResult||existingImage?.url?"Replace image":"Choose image"}<input type="file" accept="image/jpeg,image/png,image/webp,image/avif" disabled={uploading} onChange={uploadImage}/></label>{(uploadResult||existingImage?.url)&&<div className="upload-result"><Check/><img src={uploadResult?.thumbnailUrl||uploadResult?.url||existingImage.url}/><span>{uploadResult?"New image ready":"Current image"}</span></div>}</div>
+      <div className="editor-section product-images-editor"><div><h3>Product images *</h3><p>Add up to 8 images. The image marked Main appears on product cards.</p></div><label className="primary upload-button">{uploading?"Uploading…":"Add images"}<input type="file" multiple accept="image/jpeg,image/png,image/webp,image/avif" disabled={uploading||productImages.length>=8} onChange={uploadImage}/></label></div>
+      {!!productImages.length&&<div className="admin-image-grid">{productImages.map((image,index)=><article className={index===0?"main":""} key={`${image.fileId}-${index}`}><img src={image.thumbnailUrl||image.url} alt={`Product image ${index+1}`}/><span>{index===0?"Main image":`Image ${index+1}`}</span><div>{index!==0&&<button type="button" onClick={()=>makeMainImage(index)}><Check size={14}/> Make main</button>}<button type="button" aria-label={`Remove image ${index+1}`} onClick={()=>removeEditorImage(index)}><Trash2 size={14}/></button></div></article>)}</div>}
       {uploadError&&<div className="auth-error">{uploadError}</div>}
       <div className="variants-head"><div><h3>Colours and sizes *</h3><p>Select colours and enter sizes independently. The store creates all available combinations automatically.</p></div></div>
       <div className="independent-options">
