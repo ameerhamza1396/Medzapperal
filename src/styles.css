@@ -356,3 +356,13 @@ a.contact-card:hover,.contact-social:hover{transform:translateY(-3px);border-col
 .admin-image-grid button{display:flex;align-items:center;gap:4px;padding:6px;font-size:9px;color:var(--muted)}
 .admin-image-grid button:hover{color:var(--accent)}
 .admin-image-grid button:last-child{margin-left:auto;color:#b45345}
+
+/* Catalogue loading states */
+.skeleton{position:relative;overflow:hidden;background:color-mix(in srgb,var(--line) 62%,var(--surface))}
+.skeleton:after{content:"";position:absolute;inset:0;transform:translateX(-100%);background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--surface) 72%,transparent),transparent);animation:skeleton-shimmer 1.25s ease-in-out infinite}
+@keyframes skeleton-shimmer{to{transform:translateX(100%)}}
+.category-skeleton{aspect-ratio:4/5;min-height:0}
+.product-skeleton>div{width:100%;aspect-ratio:4/5}
+.product-skeleton>span,.product-skeleton>small{display:block;height:13px;margin-top:15px}
+.product-skeleton>span{width:72%}
+.product-skeleton>small{width:42%;height:9px;margin-top:9px}

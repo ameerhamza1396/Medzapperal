@@ -79,20 +79,16 @@ export async function updateProductWithVariants({ id, product, variants, images 
   const { data: existing, error: existingError } = await supabase
     .from("product_variants").select("id,color_id,size,sku").eq("product_id", id);
   if (existingError) throw existingError;
-  const retainedIds = [];
-  for (const variant of variants) {
-    const match = (existing || []).find(row => row.color_id === variant.color_id && row.size === variant.size);
-    if (match) {
-      retainedIds.push(match.id);
-      const { error } = await supabase.from("product_variants").update({...variant,sku:match.sku,is_active:true}).eq("id",match.id);
-      if (error) throw error;
-    } else {
-      const { data, error } = await supabase.from("product_variants").insert({...variant,product_id:id}).select("id").single();
-      if (error) throw error;
-      retainedIds.push(data.id);
-    }
-  }
-  const retiredIds = (existing || []).filter(row=>!retainedIds.includes(row.id)).map(row=>row.id);
+  const key = row => `${row.color_id}:${row.size}`;
+  const existingByOption = new Map((existing || []).map(row=>[key(row),row]));
+  const rows = variants.map(variant=>({
+    ...variant,product_id:id,sku:existingByOption.get(key(variant))?.sku || variant.sku,is_active:true
+  }));
+  const { error: upsertError } = await supabase.from("product_variants")
+    .upsert(rows,{onConflict:"product_id,color_id,size"});
+  if (upsertError) throw upsertError;
+  const retainedOptions = new Set(rows.map(key));
+  const retiredIds = (existing || []).filter(row=>!retainedOptions.has(key(row))).map(row=>row.id);
   if (retiredIds.length) {
     const { error } = await supabase.from("product_variants").update({is_active:false,stock_quantity:0}).in("id",retiredIds);
     if (error) throw error;

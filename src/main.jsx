@@ -189,7 +189,7 @@ function App() {
     {page === "colours" && <ColourPalette products={products} onSelect={colour=>goShop(`colour:${colour}`)} />}
     {page === "product" && selected && <Product product={selected} add={add} openProduct={openProduct} products={products}/>}
     {page === "auth" && <AuthPage user={user} profile={profile} onDone={() => setPage("home")} onAdmin={() => setPage("admin")} onContact={() => setPage("contact")} onCheckout={() => setPage("checkout")} onSignOut={async () => { await supabase?.auth.signOut(); setPage("home"); }}/>}
-    {page === "admin" && <Admin user={user} profile={profile} authReady={authReady} onLogin={() => setPage("auth")} products={products} onCreated={loadCatalog} />}
+    {page === "admin" && <Admin user={user} profile={profile} authReady={authReady} catalogLoading={catalogLoading} onLogin={() => setPage("auth")} products={products} onCreated={loadCatalog} />}
     {page === "checkout" && <Checkout user={user} profile={profile} cart={cart} setCart={setCart} onLogin={()=>setPage("auth")} onShop={()=>goShop("All")} />}
     {["terms","shipping","privacy"].includes(page) && <PolicyPage policy={policyContent[page]} />}
     {page === "contact" && <ContactPage />}
@@ -304,12 +304,12 @@ function Home({goShop,openProduct,add,products=[],catalogLoading,categories=[],r
     </section>
     <section className="section home-categories">
       <div className="section-head"><div><p className="eyebrow">SHOP BY CATEGORY</p><h2>Find your uniform.</h2></div><button className="text-link" onClick={() => goShop("All")}>View all <ArrowRight size={16}/></button></div>
-      <div className="category-grid dynamic-category-grid">{visibleCategories.slice(0,5).map((category,i) =>
+      <div className="category-grid dynamic-category-grid">{catalogLoading ? Array.from({length:5},(_,index)=><div className="category-skeleton skeleton" key={index}/>) : visibleCategories.slice(0,5).map((category,i) =>
         <button className="category" key={category.id} onClick={() => goShop(category.name)}>
           <img src={categoryImage(category)} alt={`${category.name} from the Medz Apparel collection`}/><span><small>{String(i+1).padStart(2,"0")}</small><strong>{category.name}</strong><em>{categoryTaglines[category.name] || "Explore the collection"} <ArrowRight size={15}/></em></span>
         </button>)}</div>
     </section>
-    <ProductRow title="The shift favorites." label="FEATURED / FAVORITES" list={favorites} carousel {...{openProduct,add,goShop}} />
+    <ProductRow title="The shift favorites." label="FEATURED / FAVORITES" list={favorites} loading={catalogLoading} carousel {...{openProduct,add,goShop}} />
     <section className="hero-seo">
       <p className="eyebrow">MEDICAL APPAREL / PAKISTAN</p>
       <h1>Premium Medical Scrubs and Healthcare Apparel in Pakistan</h1>
@@ -321,7 +321,7 @@ function Home({goShop,openProduct,add,products=[],catalogLoading,categories=[],r
       <div><span>02</span><h3>Considered details</h3><p>Purposeful pockets. Tailored lines. Nothing extra.</p></div>
       <div><span>03</span><h3>Made to last</h3><p>Durable construction, shift after shift.</p></div>
     </section>
-    <ProductRow title="Fresh off the line." label="NEW ARRIVALS" list={products.slice(0,8)} carousel {...{openProduct,add,goShop}} />
+    <ProductRow title="Fresh off the line." label="NEW ARRIVALS" list={products.slice(0,8)} loading={catalogLoading} carousel {...{openProduct,add,goShop}} />
     <Reviews reviews={reviews}/>
     <section className="manifesto">
       <span className="eyebrow">WHY MEDZ APPAREL</span>
@@ -333,10 +333,14 @@ function Home({goShop,openProduct,add,products=[],catalogLoading,categories=[],r
   </main>;
 }
 
-function ProductRow({title,label,list,openProduct,add,goShop,carousel=false}) {
+function ProductSkeletons({count=4,carousel=false}) {
+  return <div className={`product-grid ${carousel?"product-carousel":""}`}>{Array.from({length:count},(_,index)=><article className="product-card product-skeleton" key={index}><div className="skeleton"/><span className="skeleton"/><small className="skeleton"/></article>)}</div>;
+}
+
+function ProductRow({title,label,list,openProduct,add,goShop,carousel=false,loading=false}) {
   return <section className="section products-section">
     <div className="section-head"><div><p className="eyebrow">{label}</p><h2>{title}</h2></div><button className="text-link" onClick={() => goShop("All")}>Shop all <ArrowRight size={16}/></button></div>
-    {list.length ? <div className={`product-grid ${carousel?"product-carousel":""}`}>{list.map(p => <ProductCard key={p.id} p={p} openProduct={openProduct} add={add}/>)}</div> :
+    {loading ? <ProductSkeletons count={carousel?8:4} carousel={carousel}/> : list.length ? <div className={`product-grid ${carousel?"product-carousel":""}`}>{list.map(p => <ProductCard key={p.id} p={p} openProduct={openProduct} add={add}/>)}</div> :
     <div className="catalog-empty"><Package/><h3>The first collection is coming soon.</h3><p>New pieces added in the admin panel will appear here automatically.</p></div>}
   </section>;
 }
@@ -406,7 +410,7 @@ function Shop({initialQuery,openProduct,add,products=[],categories=[],loading,er
         <Filter title="Colour" options={colorOptions} value={color} set={setColor} swatch/>
         <Filter title="Fabric" options={fabricOptions} value={fabric} set={setFabric}/>
       </aside>
-      <div className="catalog-results"><div className="result-count">{shown.length} pieces</div>{loading ? <div className="empty"><Sparkles/><h3>Loading the collection…</h3></div> : error ? <div className="empty"><X/><h3>Could not load products</h3><p>{error}</p></div> : <><div className="product-grid">{shown.map(p => <ProductCard key={p.id} p={p} {...{openProduct,add}}/>)}</div>{!shown.length && <div className="empty"><Search/><h3>No pieces found</h3><p>{products.length ? "Try adjusting your filters." : "Products added in admin will appear here."}</p></div>}</>}</div>
+      <div className="catalog-results"><div className="result-count">{loading?"Loading products…":`${shown.length} pieces`}</div>{loading ? <ProductSkeletons count={8}/> : error ? <div className="empty"><X/><h3>Could not load products</h3><p>{error}</p></div> : <><div className="product-grid">{shown.map(p => <ProductCard key={p.id} p={p} {...{openProduct,add}}/>)}</div>{!shown.length && <div className="empty"><Search/><h3>No pieces found</h3><p>{products.length ? "Try adjusting your filters." : "Products added in admin will appear here."}</p></div>}</>}</div>
     </div>
   </main>;
 }
@@ -605,7 +609,7 @@ function AdminOrderEditor({order,onUpdated}) {
   </article>;
 }
 
-function Admin({ user, profile, authReady, onLogin, products, onCreated }) {
+function Admin({ user, profile, authReady, catalogLoading, onLogin, products, onCreated }) {
   const [uploading,setUploading] = useState(false);
   const [productImages,setProductImages] = useState([]);
   const [removedImageFileIds,setRemovedImageFileIds] = useState([]);
@@ -703,7 +707,8 @@ function Admin({ user, profile, authReady, onLogin, products, onCreated }) {
       } else await createProductWithVariants(payload);
       removedImageFileIds.forEach(fileId=>deleteFromImageKit(fileId).catch(()=>{}));
       setFormSuccess(editingId ? "Product updated successfully." : "Product published successfully.");
-      await onCreated();
+      setSaving(false);
+      onCreated();
       if (editingId) setTimeout(()=>{resetEditor();setShowForm(false)},700);
     } catch (error) { setFormError(error.message); }
     finally { setSaving(false); }
@@ -711,7 +716,7 @@ function Admin({ user, profile, authReady, onLogin, products, onCreated }) {
   if (!authReady) return <main className="auth-page"><section className="account-card"><p>Checking your account…</p></section></main>;
   if (!user || !["admin","staff"].includes(profile?.role)) return <main className="auth-page"><section className="account-card"><ShieldCheck size={35}/><p className="eyebrow">RESTRICTED AREA</p><h1>Admin access required.</h1><p>Sign in with an administrator or staff account to manage the store.</p><button className="primary" onClick={onLogin}>Sign in</button></section></main>;
   const revenue=adminData.orders.reduce((sum,o)=>["paid","processing","shipped","delivered"].includes(o.status)?sum+Number(o.total_amount):sum,0);
-  const metrics=[["Catalog products",String(products.length),"Live"],["Recorded revenue",pkr(revenue),"From orders"],["Pending orders",String(adminData.orders.filter(o=>o.status==="pending").length),"Needs review"],["Low stock",String(products.filter(p=>p.stock<10).length),"Products"]];
+  const metrics=[["Catalog products",catalogLoading?"—":String(products.length),catalogLoading?"Loading":"Live"],["Recorded revenue",pkr(revenue),"From orders"],["Pending orders",String(adminData.orders.filter(o=>o.status==="pending").length),"Needs review"],["Low stock",catalogLoading?"—":String(products.filter(p=>p.stock<10).length),"Products"]];
   return <main className="admin">
     <div className="admin-title"><div><p className="eyebrow">ADMIN / OVERVIEW</p><h1>Good morning, {profile?.full_name?.split(" ")[0] || "Admin"}.</h1><p>Manage the live Supabase catalog and ImageKit media.</p></div><button className="primary" onClick={()=>showForm?(resetEditor(),setShowForm(false)):openNew()}>{showForm?<X size={17}/>:<Plus size={17}/>} {showForm?"Close form":"Add product"}</button></div>
     {formError && !showForm && <div className="auth-error admin-page-error">{formError}</div>}
@@ -743,7 +748,7 @@ function Admin({ user, profile, authReady, onLogin, products, onCreated }) {
     <div className="metrics">{metrics.map((m,i)=><div key={m[0]}><span>{i===0?<BarChart3/>:i===1?<ShoppingBag/>:i===2?<Package/>:<Sparkles/>}</span><p>{m[0]}</p><h2>{m[1]}</h2><small>{m[2]}</small></div>)}</div>
     <section className="admin-orders-panel"><div className="panel-head"><div><p className="eyebrow">FULFILMENT</p><h2>Manage received orders</h2></div><span>{adminData.orders.length} recent</span></div>{adminData.orders.length?<div className="admin-order-list">{adminData.orders.map(order=><AdminOrderEditor key={order.id} order={order} onUpdated={loadAdminData}/>)}</div>:<div className="admin-empty">No orders yet.</div>}</section>
     <section className="inventory-panel"><div className="panel-head"><h2>Inventory alerts</h2></div>{products.filter(p=>p.stock<10).length?products.filter(p=>p.stock<10).map(p=><div className="stock-row" key={p.id}>{p.image&&<img src={p.image}/>}<div><b>{p.name}</b><span>{p.colors.join(", ")}</span></div><strong>{p.stock} left</strong></div>):<div className="admin-empty">No low-stock products.</div>}</section>
-    <section className="admin-products"><div className="panel-head"><h2>Live products</h2><span>{products.length} total</span></div>{products.length?<div className="product-table product-actions-table"><div className="table-header"><span>Product</span><span>Category</span><span>Stock</span><span>Price</span><span>Status</span><span>Actions</span></div>{products.map(p=><div key={p.id}><span>{p.image&&<img src={p.image}/>}<b>{p.name}</b></span><span>{p.category}</span><span>{p.stock}</span><span>{pkr(p.price)}</span><span className="active"><i/> Active</span><span className="row-actions"><button onClick={()=>openEdit(p)}>Edit</button><button onClick={()=>removeProduct(p)}><Trash2 size={14}/> Archive</button></span></div>)}</div>:<div className="admin-empty large">No products yet. Use “Add product” to publish your first item.</div>}</section>
+    <section className="admin-products"><div className="panel-head"><h2>Live products</h2><span>{catalogLoading?"Loading…":`${products.length} total`}</span></div>{catalogLoading?<ProductSkeletons count={4}/>:products.length?<div className="product-table product-actions-table"><div className="table-header"><span>Product</span><span>Category</span><span>Stock</span><span>Price</span><span>Status</span><span>Actions</span></div>{products.map(p=><div key={p.id}><span>{p.image&&<img src={p.image}/>}<b>{p.name}</b></span><span>{p.category}</span><span>{p.stock}</span><span>{pkr(p.price)}</span><span className="active"><i/> Active</span><span className="row-actions"><button onClick={()=>openEdit(p)}>Edit</button><button onClick={()=>removeProduct(p)}><Trash2 size={14}/> Archive</button></span></div>)}</div>:<div className="admin-empty large">No products yet. Use “Add product” to publish your first item.</div>}</section>
   </main>;
 }
 
