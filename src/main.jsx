@@ -2,19 +2,22 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   ArrowLeft, ArrowRight, Banknote, BarChart3, Check, ChevronDown, CircleUserRound,
-  CreditCard, Facebook, Heart, Instagram, LayoutGrid, Mail, MapPin, Menu, MessageCircle, Minus, Moon, Package, Phone, Plus, Search, ShoppingBag,
-  ShieldCheck, SlidersHorizontal, Sparkles, Sun, Trash2, X
+  CreditCard, Facebook, Heart, Instagram, LayoutGrid, Mail, MapPin, Menu, MessageCircle, Minus, Moon, Package, Phone, Plus, Ruler, Search, ShoppingBag,
+  ShieldCheck, SlidersHorizontal, Sparkles, Star, Sun, Trash2, Upload, X
 } from "lucide-react";
 import hero from "./assets/medzapperal-hero.png";
 import { AuthPage } from "./Auth";
 import { getMyProfile, isSupabaseConfigured, supabase } from "./lib/supabase";
-import { deleteFromImageKit, uploadToImageKit } from "./lib/imagekit";
-import { createProductWithVariants, deleteProduct, fetchAdminData, fetchCatalog, fetchDefaultAddress, placeCodOrder, saveDefaultAddress, slugify, updateOrderStatus, updateProductWithVariants } from "./lib/store";
+import { deleteFromImageKit, uploadCustomerLogo, uploadToImageKit } from "./lib/imagekit";
+import { createProductWithVariants, deleteProduct, fetchAdminData, fetchCatalog, fetchDefaultAddress, fetchStorefrontContent, placeCodOrder, saveDefaultAddress, slugify, updateOrderStatus, updateProductWithVariants } from "./lib/store";
 import "./styles.css";
 
 const palette = {
-  Navy: "#172d4f", "Ceil Blue": "#9bbbd1", Black: "#252525",
-  Wine: "#722f48", Olive: "#78836a", White: "#e9e7df", Sage: "#8e9b88"
+  "Navy Blue":"#10264C", "Ciel Blue":"#169BC5", "Sky Blue":"#9DD9F3",
+  Burgundy:"#6B1835", "Baby Pink":"#E8A7C1", Maroon:"#741D2E", Black:"#171717",
+  Grey:"#9A9AA0", "Chocolate Brown":"#553421", "Emerald Green":"#075C3F",
+  "Sage Green":"#9CAE8C", "Olive Green":"#4E5422", Beige:"#D2B78C",
+  Charcoal:"#46484B", Lavender:"#9363B5"
 };
 const pkr = value => new Intl.NumberFormat("en-PK",{style:"currency",currency:"PKR",maximumFractionDigits:0}).format(Number(value)||0);
 
@@ -48,12 +51,13 @@ function prepareOrderChime() {
   }
 }
 
-const categoryCards = [
-  ["Scrubs", "Built for every move"],
-  ["Lab Coats", "Precision, refined"],
-  ["Jackets", "Your extra layer"],
-  ["Accessories", "Shift essentials"]
-];
+const categoryTaglines = {
+  Scrubs:"Built for every move",
+  "Scrub Upper":"The essential top",
+  "Lab Coats":"Precision, refined",
+  Outerwear:"Your extra layer",
+  Accessories:"Shift essentials"
+};
 
 const policyContent = {
   terms: {
@@ -123,6 +127,8 @@ function App() {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
+  const [categories,setCategories] = useState([]);
+  const [reviews,setReviews] = useState([]);
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
     localStorage.setItem("mz-theme", dark ? "dark" : "light");
@@ -132,7 +138,10 @@ function App() {
   }, [page]);
   const loadCatalog = async () => {
     setCatalogLoading(true); setCatalogError("");
-    try { setProducts(await fetchCatalog()); }
+    try {
+      const [nextProducts,content] = await Promise.all([fetchCatalog(),fetchStorefrontContent()]);
+      setProducts(nextProducts); setCategories(content.categories); setReviews(content.reviews);
+    }
     catch (error) { setCatalogError(error.message); }
     finally { setCatalogLoading(false); }
   };
@@ -159,43 +168,52 @@ function App() {
 
   const goShop = (category = "All") => { setQuery(category === "All" ? "" : category); setPage("shop"); setMenuOpen(false); };
   const openProduct = p => { setSelected(p); setPage("product"); };
-  const add = (product, size = product.sizes[0], color = product.colors[0]) => {
-    const variant = product.variants?.find(v => v.size === size && v.colors?.name === color) || product.variants?.[0];
-    if (!variant) return;
-    const price = variant.price_override == null ? product.price : Number(variant.price_override);
-    setCart(c => [...c, { ...product, price, cartId: `${Date.now()}-${Math.random()}`, size:variant.size, color:variant.colors?.name||color, variantId:variant.id }]);
+  const add = (product, size = product.sizes[0], color = product.colors[0], customization = {}) => {
+    const variant = product.variants?.find(v => v.size === size && v.colors?.name === color);
+    if (!variant) {
+      window.alert("That colour and size combination is not available yet. Please choose another option.");
+      return;
+    }
+    const basePrice = variant.price_override == null ? product.price : Number(variant.price_override);
+    const measurementFee = Object.values(customization.measurements || {}).filter(value=>String(value).trim()).length * 100;
+    const price = basePrice + measurementFee;
+    setCart(c => [...c, { ...product, price, basePrice, customization, cartId: `${Date.now()}-${Math.random()}`, size:variant.size, color:variant.colors?.name||color, variantId:variant.id }]);
     setCartOpen(true);
   };
 
   return <div className="app">
     <div className="announcement">COMPLIMENTARY SHIPPING ON ORDERS PKR 10,000+ <span>SHOP NOW <ArrowRight size={13}/></span></div>
-    <Header {...{dark,setDark,page,setPage,goShop,cart,setCartOpen,menuOpen,setMenuOpen,query,setQuery,user}} />
-    {page === "home" && <Home {...{goShop,openProduct,add,products,catalogLoading}} />}
-    {page === "shop" && <Shop initialQuery={query} openProduct={openProduct} add={add} products={products} loading={catalogLoading} error={catalogError}/>}
+    <Header {...{dark,setDark,page,setPage,goShop,cart,setCartOpen,menuOpen,setMenuOpen,query,setQuery,user,categories}} />
+    {page === "home" && <Home {...{goShop,openProduct,add,products,catalogLoading,categories,reviews}} />}
+    {page === "shop" && <Shop initialQuery={query} openProduct={openProduct} add={add} products={products} categories={categories} loading={catalogLoading} error={catalogError}/>}
+    {page === "colours" && <ColourPalette products={products} onSelect={colour=>goShop(`colour:${colour}`)} />}
     {page === "product" && selected && <Product product={selected} add={add} openProduct={openProduct} products={products}/>}
     {page === "auth" && <AuthPage user={user} profile={profile} onDone={() => setPage("home")} onAdmin={() => setPage("admin")} onContact={() => setPage("contact")} onCheckout={() => setPage("checkout")} onSignOut={async () => { await supabase?.auth.signOut(); setPage("home"); }}/>}
     {page === "admin" && <Admin user={user} profile={profile} authReady={authReady} onLogin={() => setPage("auth")} products={products} onCreated={loadCatalog} />}
     {page === "checkout" && <Checkout user={user} profile={profile} cart={cart} setCart={setCart} onLogin={()=>setPage("auth")} onShop={()=>goShop("All")} />}
     {["terms","shipping","privacy"].includes(page) && <PolicyPage policy={policyContent[page]} />}
     {page === "contact" && <ContactPage />}
-    <Footer goShop={goShop} onNavigate={setPage}/>
+    <Footer goShop={goShop} onNavigate={setPage} categories={categories}/>
     <Cart cart={cart} setCart={setCart} open={cartOpen} close={() => setCartOpen(false)} onCheckout={()=>{setCartOpen(false);setPage("checkout")}}/>
   </div>;
 }
 
-function Header({dark,setDark,page,setPage,goShop,cart,setCartOpen,menuOpen,setMenuOpen,query,setQuery,user}) {
+function Header({dark,setDark,page,setPage,goShop,cart,setCartOpen,menuOpen,setMenuOpen,query,setQuery,user,categories=[]}) {
   const menuButtonRef = useRef(null);
   const menuRef = useRef(null);
+  const [openNavGroup,setOpenNavGroup] = useState("");
   useEffect(() => {
-    if (!menuOpen) return;
+    if (!menuOpen && !openNavGroup) return;
     const closeOutside = event => {
       if (!menuRef.current?.contains(event.target) && !menuButtonRef.current?.contains(event.target)) {
         setMenuOpen(false);
+        setOpenNavGroup("");
       }
     };
     const closeOnEscape = event => {
       if (event.key === "Escape") {
         setMenuOpen(false);
+        setOpenNavGroup("");
         menuButtonRef.current?.focus();
       }
     };
@@ -205,18 +223,35 @@ function Header({dark,setDark,page,setPage,goShop,cart,setCartOpen,menuOpen,setM
       document.removeEventListener("pointerdown", closeOutside);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [menuOpen,setMenuOpen]);
+  }, [menuOpen,openNavGroup,setMenuOpen]);
+  const closeNavigation = () => {
+    setMenuOpen(false);
+    setOpenNavGroup("");
+  };
+  const selectShopCategory = category => {
+    goShop(category);
+    closeNavigation();
+  };
   return <header>
-    <button ref={menuButtonRef} className="mobile-only icon-btn" aria-label="Open menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}><Menu/></button>
-    <button className="logo" onClick={() => setPage("home")} aria-label="Medzapperal home">
-      <img className="brand-logo" src="/media/medz-logo.png" alt=""/>MEDZAPPERAL
+    <button ref={menuButtonRef} className="mobile-only icon-btn" aria-label="Open menu" aria-expanded={menuOpen} onClick={() => {setMenuOpen(!menuOpen);setOpenNavGroup("")}}><Menu/></button>
+    <button className="logo" onClick={() => setPage("home")} aria-label="Medz Apparel home">
+      <img className="brand-logo" src="/media/medz-logo.png" alt=""/>MEDZ APPAREL
     </button>
     <nav ref={menuRef} className={menuOpen ? "open" : ""}>
-      <button onClick={() => goShop("Scrubs")}>Scrubs</button>
-      <button onClick={() => goShop("Lab Coats")}>Lab coats</button>
-      <button onClick={() => goShop("Jackets")}>Jackets</button>
-      <button onClick={() => goShop("Accessories")}>Accessories</button>
-      <button onClick={() => goShop("All")}>Shop all</button>
+      <div className={`nav-group ${openNavGroup === "scrubs" ? "open" : ""}`}>
+        <button className="nav-group-trigger" aria-expanded={openNavGroup === "scrubs"} aria-controls="scrubs-submenu" onClick={() => setOpenNavGroup(current => current === "scrubs" ? "" : "scrubs")}>Scrubs <ChevronDown size={14}/></button>
+        <div className="nav-group-menu" id="scrubs-submenu">
+          <button onClick={() => selectShopCategory("Scrubs")}>Signature scrubs</button>
+          <button onClick={() => {setPage("colours");closeNavigation()}}>Shop by colour</button>
+        </div>
+      </div>
+      <div className={`nav-group ${openNavGroup === "categories" ? "open" : ""}`}>
+        <button className="nav-group-trigger" aria-expanded={openNavGroup === "categories"} aria-controls="categories-submenu" onClick={() => setOpenNavGroup(current => current === "categories" ? "" : "categories")}>Categories <ChevronDown size={14}/></button>
+        <div className="nav-group-menu" id="categories-submenu">{categories.filter(item=>["Scrub Upper","Lab Coats","Accessories"].includes(item.name)).map(item=><button key={item.id} onClick={()=>selectShopCategory(item.name)}>{item.name}</button>)}</div>
+      </div>
+      <button onClick={() => selectShopCategory("Sale")}>Sale</button>
+      <button onClick={() => {setPage("auth");closeNavigation()}}>Order tracking</button>
+      <button onClick={() => {setPage("contact");closeNavigation()}}>Contact us</button>
     </nav>
     <div className="header-actions">
       <button className="icon-btn desktop-only" onClick={() => { if (page !== "shop") { setPage("shop"); setQuery(""); } }}><Search size={20}/></button>
@@ -227,7 +262,7 @@ function Header({dark,setDark,page,setPage,goShop,cart,setCartOpen,menuOpen,setM
   </header>;
 }
 
-function Home({goShop,openProduct,add,products,catalogLoading}) {
+function Home({goShop,openProduct,add,products=[],catalogLoading,categories=[],reviews=[]}) {
   useEffect(() => {
     const root = document.querySelector(".home-page");
     if (!root) return;
@@ -253,10 +288,13 @@ function Home({goShop,openProduct,add,products,catalogLoading}) {
     elements.forEach(element=>observer.observe(element));
     return () => observer.disconnect();
   },[products.length,catalogLoading]);
-  const categoryImage = name =>
-    products.find(product =>
-      product.image && product.category?.toLowerCase() === name.toLowerCase()
+  const visibleCategories = categories.length ? categories : [...new Set(products.map(product=>product.category))].map((name,index)=>({id:name,name,sort_order:index}));
+  const categoryImage = category =>
+    category.image_url || products.find(product =>
+      product.image && product.category?.toLowerCase() === category.name.toLowerCase()
     )?.image || hero;
+  const featured = products.filter(product=>product.isFeatured).slice(0,8);
+  const favorites = featured.length ? featured : products.slice(0,8);
   return <main className="home-page">
     <section className="hero">
       <video autoPlay muted loop playsInline poster="/media/medz-hero-poster.jpg" aria-label="Medz Apparel medical uniforms and outerwear collection">
@@ -264,6 +302,14 @@ function Home({goShop,openProduct,add,products,catalogLoading}) {
         <img src="/media/medz-hero.gif" alt="Medz Apparel medical uniforms and outerwear collection"/>
       </video>
     </section>
+    <section className="section home-categories">
+      <div className="section-head"><div><p className="eyebrow">SHOP BY CATEGORY</p><h2>Find your uniform.</h2></div><button className="text-link" onClick={() => goShop("All")}>View all <ArrowRight size={16}/></button></div>
+      <div className="category-grid dynamic-category-grid">{visibleCategories.slice(0,5).map((category,i) =>
+        <button className="category" key={category.id} onClick={() => goShop(category.name)}>
+          <img src={categoryImage(category)} alt={`${category.name} from the Medz Apparel collection`}/><span><small>{String(i+1).padStart(2,"0")}</small><strong>{category.name}</strong><em>{categoryTaglines[category.name] || "Explore the collection"} <ArrowRight size={15}/></em></span>
+        </button>)}</div>
+    </section>
+    <ProductRow title="The shift favorites." label="FEATURED / FAVORITES" list={favorites} carousel {...{openProduct,add,goShop}} />
     <section className="hero-seo">
       <p className="eyebrow">MEDICAL APPAREL / PAKISTAN</p>
       <h1>Premium Medical Scrubs and Healthcare Apparel in Pakistan</h1>
@@ -275,30 +321,45 @@ function Home({goShop,openProduct,add,products,catalogLoading}) {
       <div><span>02</span><h3>Considered details</h3><p>Purposeful pockets. Tailored lines. Nothing extra.</p></div>
       <div><span>03</span><h3>Made to last</h3><p>Durable construction, shift after shift.</p></div>
     </section>
-    <section className="section">
-      <div className="section-head"><div><p className="eyebrow">SHOP BY CATEGORY</p><h2>Find your uniform.</h2></div><button className="text-link" onClick={() => goShop("All")}>View all <ArrowRight size={16}/></button></div>
-      <div className="category-grid">{categoryCards.map(([name,tag],i) =>
-        <button className={`category c${i+1}`} key={name} onClick={() => goShop(name)}>
-          <img src={categoryImage(name)} alt={`${name} from the Medz Apparel collection`}/><span><small>0{i+1}</small><strong>{name}</strong><em>{tag} <ArrowRight size={15}/></em></span>
-        </button>)}</div>
-    </section>
-    <ProductRow title="The shift favorites." label="MOST LOVED" list={products.slice(0,4)} {...{openProduct,add,goShop}} />
+    <ProductRow title="Fresh off the line." label="NEW ARRIVALS" list={products.slice(0,8)} carousel {...{openProduct,add,goShop}} />
+    <Reviews reviews={reviews}/>
     <section className="manifesto">
-      <span className="eyebrow">WHY MEDZAPPERAL</span>
+      <span className="eyebrow">WHY MEDZ APPAREL</span>
       <h2>Because what you wear<br/>should work as hard as <em>you do.</em></h2>
       <p>We design medical apparel through a more thoughtful lens—balancing technical performance with a sense of ease, so you can focus on what matters.</p>
       <button className="secondary">Our story <ArrowRight size={16}/></button>
     </section>
-    <ProductRow title="Fresh off the line." label="NEW ARRIVALS" list={products.slice(4,8)} {...{openProduct,add,goShop}} />
     <section className="newsletter"><p className="eyebrow">STAY IN THE LOOP</p><h2>A better shift starts here.</h2><p>New drops, thoughtful stories, and first access—straight to your inbox.</p><form onSubmit={e => e.preventDefault()}><input placeholder="Email address" type="email"/><button><ArrowRight/></button></form></section>
   </main>;
 }
 
-function ProductRow({title,label,list,openProduct,add,goShop}) {
+function ProductRow({title,label,list,openProduct,add,goShop,carousel=false}) {
   return <section className="section products-section">
     <div className="section-head"><div><p className="eyebrow">{label}</p><h2>{title}</h2></div><button className="text-link" onClick={() => goShop("All")}>Shop all <ArrowRight size={16}/></button></div>
-    {list.length ? <div className="product-grid">{list.map(p => <ProductCard key={p.id} p={p} openProduct={openProduct} add={add}/>)}</div> :
+    {list.length ? <div className={`product-grid ${carousel?"product-carousel":""}`}>{list.map(p => <ProductCard key={p.id} p={p} openProduct={openProduct} add={add}/>)}</div> :
     <div className="catalog-empty"><Package/><h3>The first collection is coming soon.</h3><p>New pieces added in the admin panel will appear here automatically.</p></div>}
+  </section>;
+}
+
+const colourDescriptions = {
+  "Ceil Blue":"Fresh · Clean · Calming", Navy:"Classic · Professional · Confident",
+  "Sky Blue":"Soft · Soothing · Serene", Burgundy:"Rich · Elegant · Powerful",
+  "Baby Pink":"Gentle · Soft · Nurturing", Maroon:"Bold · Strong · Timeless",
+  Black:"Sleek · Sharp · Sophisticated", Grey:"Balanced · Neutral · Modern",
+  "Chocolate Brown":"Warm · Earthy · Reliable", "Emerald Green":"Vibrant · Rich · Refreshing",
+  "Sage Green":"Calm · Natural · Grounded", "Olive Green":"Strong · Natural · Balanced",
+  Beige:"Warm · Soft · Minimal", Charcoal:"Strong · Modern · Versatile",
+  Lavender:"Calm · Elegant · Creative"
+};
+
+function ColourPalette({products=[],onSelect}) {
+  const colours=[...new Map(products.flatMap(product=>product.variants||[]).filter(variant=>variant.colors?.name).map(variant=>[variant.colors.name,{name:variant.colors.name,hex:variant.colors.hex}])).values()];
+  return <main className="colour-page"><section className="colour-hero"><img className="brand-logo" src="/media/medz-logo.png" alt=""/><p className="eyebrow">MEDZ APPAREL · THE DOCTOR&apos;S THREAD</p><h1><span>Colour</span> <em>Palette</em></h1><p>Carefully curated shades for every style and every shift.</p></section><section className="colour-grid">{colours.map(colour=><button key={colour.name} onClick={()=>onSelect(colour.name)}><span className="colour-fabric" style={{"--colour":colour.hex||palette[colour.name]||"#777"}}/><strong>{colour.name}</strong><i>✦</i><small>{colourDescriptions[colour.name]||"Premium colour · Everyday comfort"}</small></button>)}</section>{!colours.length&&<div className="reviews-empty"><Sparkles/><p>Colours added to active Supabase product variants will appear here automatically.</p></div>}<section className="colour-signoff"><p>Because colour is more than a choice.</p><h2>It&apos;s an expression.</h2><span>Premium colours · Premium comfort · Premium you.</span></section></main>;
+}
+
+function Reviews({reviews}) {
+  return <section className="section reviews-section"><div className="section-head"><div><p className="eyebrow">CUSTOMER REVIEWS</p><h2>Worn and loved.</h2></div><span><Star size={15} fill="currentColor"/> Real customer feedback</span></div>
+    {reviews.length?<div className="review-posters">{reviews.map(review=><figure key={review.id}><img src={review.image_url} alt={review.title || "Medz Apparel customer review"}/>{review.title&&<figcaption>{review.title}</figcaption>}</figure>)}</div>:<div className="reviews-empty"><MessageCircle/><p>Customer review stories will appear here when review images are added in Supabase.</p></div>}
   </section>;
 }
 
@@ -306,24 +367,32 @@ function ProductCard({p,openProduct,add}) {
   return <article className="product-card">
     <button className="product-image" onClick={() => openProduct(p)}>{p.image ? <img src={p.image} alt={p.name}/> : <span className="image-placeholder"><Package/></span>}{p.badge && <span className="badge">{p.badge}</span>}<span className="quick" onClick={e => {e.stopPropagation(); add(p)}}><Plus size={18}/> Quick add</span></button>
     <div className="product-meta"><button onClick={() => openProduct(p)}><strong>{p.name}</strong><span>{p.gender} · {p.fabric}</span></button><b>{pkr(p.price)}</b></div>
-    <div className="swatches">{p.colors.map(c => <i key={c} style={{background:palette[c]}} title={c}/>)}</div>
+    <div className="swatches">{p.colors.map(c => <i key={c} style={{background:p.variants.find(variant=>variant.colors?.name===c)?.colors?.hex||palette[c]||"#777"}} title={c}/>)}</div>
   </article>;
 }
 
-function Shop({initialQuery,openProduct,add,products,loading,error}) {
-  const [category,setCategory] = useState(["Scrubs","Lab Coats","Jackets","Accessories"].includes(initialQuery) ? initialQuery : "All");
+function Shop({initialQuery,openProduct,add,products=[],categories=[],loading,error}) {
+  const categoryOptions = ["All",...categories.map(item=>item.name)];
+  const requestedColour = initialQuery?.startsWith("colour:") ? initialQuery.slice(7) : "All";
+  const normalizedInitial = initialQuery === "Sale" || categoryOptions.includes(initialQuery) ? initialQuery : "All";
+  const [category,setCategory] = useState(normalizedInitial);
   const [search,setSearch] = useState("");
-  const [color,setColor] = useState("All");
+  const [color,setColor] = useState(requestedColour);
   const [fabric,setFabric] = useState("All");
   const [sort,setSort] = useState("Featured");
   const [filters,setFilters] = useState(false);
-  useEffect(() => setCategory(["Scrubs","Lab Coats","Jackets","Accessories"].includes(initialQuery) ? initialQuery : "All"), [initialQuery]);
+  const colorOptions = ["All",...new Set(products.flatMap(product=>product.colors))];
+  const fabricOptions = ["All",...new Set(products.map(product=>product.fabric).filter(Boolean))];
+  useEffect(() => {
+    setCategory(initialQuery === "Sale" || categoryOptions.includes(initialQuery) ? initialQuery : "All");
+    setColor(initialQuery?.startsWith("colour:") ? initialQuery.slice(7) : "All");
+  }, [initialQuery,categories.length]);
   let shown = useMemo(() => products.filter(p =>
-    (category === "All" || p.category === category) &&
+    (category === "All" || category === "Sale" ? category !== "Sale" || p.isFeatured : p.category === category) &&
     (color === "All" || p.colors.includes(color)) &&
     (fabric === "All" || p.fabric === fabric) &&
     p.name.toLowerCase().includes(search.toLowerCase())
-  ).sort((a,b) => sort === "Price: Low" ? a.price-b.price : sort === "Price: High" ? b.price-a.price : b.stock-a.stock),[category,color,fabric,search,sort]);
+  ).sort((a,b) => sort === "Price: Low" ? a.price-b.price : sort === "Price: High" ? b.price-a.price : Number(b.isFeatured)-Number(a.isFeatured)||new Date(b.createdAt)-new Date(a.createdAt)),[products,category,color,fabric,search,sort]);
   return <main className="shop">
     <div className="shop-title"><p className="eyebrow">THE COLLECTION</p><h1>{category === "All" ? "Shop all" : category}</h1><p>Considered essentials for every kind of shift.</p></div>
     <div className="shop-toolbar">
@@ -333,9 +402,9 @@ function Shop({initialQuery,openProduct,add,products,loading,error}) {
     </div>
     <div className="catalog">
       <aside className={filters ? "visible" : ""}>
-        <Filter title="Category" options={["All","Scrubs","Lab Coats","Jackets","Accessories"]} value={category} set={setCategory}/>
-        <Filter title="Color" options={["All",...Object.keys(palette)]} value={color} set={setColor} swatch/>
-        <Filter title="Fabric" options={["All","4-Way Stretch","Flexweave™","Antimicrobial Twill","Poly-Cotton","Rip-stop","Cotton Blend"]} value={fabric} set={setFabric}/>
+        <Filter title="Category" options={[...categoryOptions,"Sale"]} value={category} set={setCategory}/>
+        <Filter title="Colour" options={colorOptions} value={color} set={setColor} swatch/>
+        <Filter title="Fabric" options={fabricOptions} value={fabric} set={setFabric}/>
       </aside>
       <div className="catalog-results"><div className="result-count">{shown.length} pieces</div>{loading ? <div className="empty"><Sparkles/><h3>Loading the collection…</h3></div> : error ? <div className="empty"><X/><h3>Could not load products</h3><p>{error}</p></div> : <><div className="product-grid">{shown.map(p => <ProductCard key={p.id} p={p} {...{openProduct,add}}/>)}</div>{!shown.length && <div className="empty"><Search/><h3>No pieces found</h3><p>{products.length ? "Try adjusting your filters." : "Products added in admin will appear here."}</p></div>}</>}</div>
     </div>
@@ -349,31 +418,79 @@ function Filter({title,options,value,set,swatch}) {
 function Product({product,add,openProduct,products}) {
   const [color,setColor] = useState(product.colors[0]);
   const [size,setSize] = useState(product.sizes[0]);
+  const [gender,setGender] = useState(product.gender);
   const [qty,setQty] = useState(1);
-  useEffect(()=>{setColor(product.colors[0]);setSize(product.sizes[0]);setQty(1)},[product]);
+  const [customize,setCustomize] = useState(false);
+  const [sleeve,setSleeve] = useState("Half");
+  const [nameEngraving,setNameEngraving] = useState(false);
+  const [engravingName,setEngravingName] = useState("");
+  const [logoEngraving,setLogoEngraving] = useState(false);
+  const [logo,setLogo] = useState(null);
+  const [logoUploading,setLogoUploading] = useState(false);
+  const [customSizing,setCustomSizing] = useState(false);
+  const [measurements,setMeasurements] = useState({chest:"",waist:"",shirt_length:"",sleeve_length:"",trouser_length:""});
+  const [trouserStyle,setTrouserStyle] = useState("Straight");
+  const [design,setDesign] = useState(product.images?.[0]?.url || product.image);
+  const [sizeChart,setSizeChart] = useState(false);
+  const galleryImages = product.images?.length ? product.images : [{id:"primary",url:product.image}];
+  const colourBased = product.productMode === "colour";
+  const measurementFee = customize&&customSizing ? Object.values(measurements).filter(value=>String(value).trim()).length*100 : 0;
+  useEffect(()=>{setColor(product.colors[0]);setSize(product.sizes[0]);setGender(product.gender);setQty(1);setDesign(product.images?.[0]?.url||product.image);setCustomize(false)},[product]);
+  const customization = customize ? {
+    gender,sleeve,
+    name_engraving:nameEngraving ? engravingName.trim() : null,
+    logo_engraving:logoEngraving ? logo : null,
+    measurements:customSizing ? measurements : {},
+    trouser_style:trouserStyle,
+    design:colourBased ? design : null
+  } : {gender,design:colourBased ? design : null};
+  const uploadLogo = async event => {
+    const file=event.target.files?.[0]; if(!file)return;
+    setLogoUploading(true);
+    try { const result=await uploadCustomerLogo(file); setLogo({url:result.url,file_id:result.fileId,name:file.name}); }
+    catch(error){window.alert(error.message)}
+    finally{setLogoUploading(false);event.target.value=""}
+  };
   return <main className="product-page">
     <button className="back" onClick={()=>history.back()}><ArrowLeft size={16}/> Back to collection</button>
     <div className="product-layout">
-      <div className="gallery"><img src={product.image} alt={product.name}/><div className="gallery-count">01 / 03</div></div>
+      <div className="product-gallery-wrap"><div className="gallery"><img src={colourBased?design:product.image} alt={product.name}/><div className="gallery-count">{colourBased?`${galleryImages.findIndex(item=>item.url===design)+1} / ${galleryImages.length}`:"01"}</div></div>{colourBased&&<div className="design-gallery" aria-label="Choose a design">{galleryImages.slice(0,8).map((image,index)=><button className={design===image.url?"selected":""} key={image.id} onClick={()=>setDesign(image.url)}><img src={image.url} alt={`Design ${index+1}`}/><span>{index+1}</span></button>)}</div>}</div>
       <div className="product-info">
         <p className="eyebrow">{product.category} · {product.gender}</p><h1>{product.name}</h1><p className="price">{pkr(product.price)}</p>
         <p className="description">Polished enough for rounds, comfortable enough for the longest shift. Crafted in our signature {product.fabric.toLowerCase()} fabric with a clean, easy fit and thoughtfully placed utility.</p>
-        <div className="selector"><div><b>Color</b><span>{color}</span></div><div className="color-options">{product.colors.map(c=><button key={c} className={color===c?"selected":""} onClick={()=>setColor(c)} style={{"--swatch":palette[c]}} aria-label={c}/>)}</div></div>
-        <div className="selector"><div><b>Size</b><button className="underlined">Size guide</button></div><div className="size-options">{product.sizes.map(s=><button key={s} className={size===s?"selected":""} onClick={()=>setSize(s)}>{s}</button>)}</div></div>
-        <div className="buy-row"><div className="quantity"><button onClick={()=>setQty(Math.max(1,qty-1))}><Minus size={15}/></button>{qty}<button onClick={()=>setQty(qty+1)}><Plus size={15}/></button></div><button className="primary" onClick={()=>Array.from({length:qty}).forEach(()=>add(product,size,color))}>Add to bag — {pkr(product.price*qty)}</button><button className="wish"><Heart/></button></div>
+        <div className="selector"><div><b>Gender</b><span>{gender}</span></div><div className="size-options">{["Women","Men","Unisex"].map(option=><button key={option} className={gender===option?"selected":""} onClick={()=>setGender(option)}>{option}</button>)}</div></div>
+        {!colourBased&&<div className="selector"><div><b>Colour</b><span>{color}</span></div><div className="color-options">{product.colors.map(c=><button key={c} className={color===c?"selected":""} onClick={()=>setColor(c)} style={{"--swatch":product.variants.find(variant=>variant.colors?.name===c)?.colors?.hex||palette[c]||"#888"}} aria-label={c}/>)}</div></div>}
+        <div className="selector"><div><b>Size</b><button className="underlined" onClick={()=>setSizeChart(true)}>Size chart</button></div><div className="size-options">{product.sizes.map(s=><button key={s} className={size===s?"selected":""} onClick={()=>setSize(s)}>{s}</button>)}</div></div>
+        <section className="customization-panel"><div className="customization-head"><div><b>Customize this item</b><span>Optional sleeves, engraving, measurements and trouser style</span></div><div className="yes-no"><button className={!customize?"selected":""} onClick={()=>setCustomize(false)}>No</button><button className={customize?"selected":""} onClick={()=>setCustomize(true)}>Yes</button></div></div>{customize&&<div className="customization-fields">
+          <OptionButtons label="Sleeve" options={["Half","Quarter","Full"]} value={sleeve} setValue={setSleeve}/>
+          <ToggleField label="Name engraving" enabled={nameEngraving} setEnabled={setNameEngraving}>{nameEngraving&&<input maxLength="12" value={engravingName} onChange={event=>setEngravingName(event.target.value)} placeholder="Name, up to 12 letters"/>}</ToggleField>
+          <ToggleField label="Logo engraving" enabled={logoEngraving} setEnabled={setLogoEngraving}>{logoEngraving&&<label className="customer-logo-upload"><Upload size={16}/>{logoUploading?"Uploading…":logo?logo.name:"Upload your logo"}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={uploadLogo} disabled={logoUploading}/><small>PNG, JPEG or WebP · maximum 2 MB</small></label>}</ToggleField>
+          <ToggleField label="Size customization" enabled={customSizing} setEnabled={setCustomSizing}>{customSizing&&<div className="measurements-grid">{Object.entries(measurements).map(([key,value])=><label key={key}>{key.replaceAll("_"," ")}<input type="number" min="0" step=".1" value={value} onChange={event=>setMeasurements(current=>({...current,[key]:event.target.value}))} placeholder="inches"/></label>)}<p><Ruler size={14}/> Rs 100 per completed measurement · {pkr(measurementFee)}</p></div>}</ToggleField>
+          <OptionButtons label="Trouser style" options={["Straight","Bottom/Cargo"]} value={trouserStyle} setValue={setTrouserStyle}/>
+        </div>}</section>
+        <div className="buy-row"><div className="quantity"><button onClick={()=>setQty(Math.max(1,qty-1))}><Minus size={15}/></button>{qty}<button onClick={()=>setQty(qty+1)}><Plus size={15}/></button></div><button className="primary" disabled={customize&&logoEngraving&&!logo} onClick={()=>Array.from({length:qty}).forEach(()=>add(product,size,color,customization))}>Add to bag — {pkr((product.price+measurementFee)*qty)}</button><button className="wish"><Heart/></button></div>
         <p className="stock"><i/> In stock — ready to ship</p>
         {["Details & fit","Fabric & care","Shipping & returns"].map(x=><button className="accordion" key={x}>{x}<Plus size={18}/></button>)}
       </div>
     </div>
     <ProductRow title="Complete the rotation." label="YOU MAY ALSO LIKE" list={products.filter(p=>p.id!==product.id).slice(0,4)} {...{openProduct,add}} goShop={()=>{}}/>
+    {sizeChart&&<div className="modal-backdrop" onClick={()=>setSizeChart(false)}><section className="size-chart-modal" onClick={event=>event.stopPropagation()}><button className="modal-close" onClick={()=>setSizeChart(false)}><X/></button><p className="eyebrow">MEDZ APPAREL SIZE GUIDE</p><h2>Find your fit.</h2><table><thead><tr><th>Size</th><th>Chest</th><th>Waist</th><th>Hip</th></tr></thead><tbody>{[["XS","32–34","26–28","34–36"],["S","34–36","28–30","36–38"],["M","38–40","32–34","40–42"],["L","42–44","36–38","44–46"],["XL","46–48","40–42","48–50"],["2XL","50–52","44–46","52–54"]].map(row=><tr key={row[0]}>{row.map(cell=><td key={cell}>{cell}</td>)}</tr>)}</tbody></table><small>Measurements are in inches. For a custom fit, complete only the measurements you need.</small></section></div>}
   </main>;
+}
+
+function OptionButtons({label,options,value,setValue}) {
+  return <div className="custom-option"><b>{label}</b><div>{options.map(option=><button key={option} className={value===option?"selected":""} onClick={()=>setValue(option)}>{option}</button>)}</div></div>;
+}
+
+function ToggleField({label,enabled,setEnabled,children}) {
+  return <div className="custom-option toggle-option"><div><b>{label}</b><div className="yes-no"><button className={!enabled?"selected":""} onClick={()=>setEnabled(false)}>No</button><button className={enabled?"selected":""} onClick={()=>setEnabled(true)}>Yes</button></div></div>{children}</div>;
 }
 
 function Cart({cart,setCart,open,close,onCheckout}) {
   const total=cart.reduce((s,p)=>s+p.price,0);
   return <><div className={`overlay ${open?"show":""}`} onClick={close}/><aside className={`cart-drawer ${open?"open":""}`}><div className="cart-head"><h2>Your bag <span>{cart.length}</span></h2><button onClick={close}><X/></button></div>
     {!cart.length ? <div className="empty"><ShoppingBag/><h3>Your bag is taking a break.</h3><p>Fill it with something made for the shift.</p><button className="primary" onClick={close}>Continue shopping</button></div> :
-    <><div className="cart-items">{cart.map(item=><div className="cart-item" key={item.cartId}><img src={item.image}/><div><strong>{item.name}</strong><span>{item.color} / {item.size}</span><b>{pkr(item.price)}</b></div><button onClick={()=>setCart(c=>c.filter(x=>x.cartId!==item.cartId))}><Trash2 size={16}/></button></div>)}</div><div className="cart-bottom"><p><span>Subtotal</span><b>{pkr(total)}</b></p><small>Shipping calculated at checkout.</small><button className="primary" onClick={onCheckout}>Checkout <ArrowRight size={17}/></button></div></>}</aside></>;
+    <><div className="cart-items">{cart.map(item=><div className="cart-item" key={item.cartId}><img src={item.customization?.design||item.image}/><div><strong>{item.name}</strong><span>{item.color} / {item.size}{item.customization?.sleeve&&` · ${item.customization.sleeve} sleeve`}</span>{item.customization?.name_engraving&&<small>Engraving: {item.customization.name_engraving}</small>}<b>{pkr(item.price)}</b></div><button onClick={()=>setCart(c=>c.filter(x=>x.cartId!==item.cartId))}><Trash2 size={16}/></button></div>)}</div><div className="cart-bottom"><p><span>Subtotal</span><b>{pkr(total)}</b></p><small>Shipping calculated at checkout.</small><button className="primary" onClick={onCheckout}>Checkout <ArrowRight size={17}/></button></div></>}</aside></>;
 }
 
 const pakistanCities = ["Abbottabad","Bahawalpur","Bannu","Chiniot","Dera Ghazi Khan","Faisalabad","Gilgit","Gujranwala","Gujrat","Hyderabad","Islamabad","Jacobabad","Jhelum","Karachi","Kasur","Khanewal","Khuzdar","Kohat","Lahore","Larkana","Mardan","Mirpur","Multan","Muzaffarabad","Nawabshah","Nowshera","Okara","Peshawar","Quetta","Rahim Yar Khan","Rawalpindi","Sahiwal","Sargodha","Sheikhupura","Sialkot","Sukkur","Swabi","Thatta","Turbat","Wah Cantt"];
@@ -404,7 +521,7 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
     }).catch(()=>{});
     return()=>{active=false};
   },[user?.id]);
-  const grouped=useMemo(()=>Object.values(cart.reduce((acc,item)=>{const key=item.variantId;if(!acc[key])acc[key]={...item,quantity:0};acc[key].quantity++;return acc},{})),[cart]);
+  const grouped=useMemo(()=>Object.values(cart.reduce((acc,item)=>{const key=`${item.variantId}:${JSON.stringify(item.customization||{})}`;if(!acc[key])acc[key]={...item,groupKey:key,quantity:0};acc[key].quantity++;return acc},{})),[cart]);
   const subtotal=grouped.reduce((sum,item)=>sum+item.price*item.quantity,0);
   const delivery=200+(50*cart.length);
   const total=subtotal+delivery;
@@ -446,11 +563,11 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
         </form>:<div className="review">
           <div className="review-block"><div className="review-head"><h2>Delivery address</h2><button onClick={()=>setStep("details")}>Edit</button></div><b>{address.recipient_name}</b><p>{address.complete_address}<br/>{address.city}, Pakistan<br/>{address.mobile}{address.secondary_mobile&&` · ${address.secondary_mobile}`}</p>{saveDetails&&<small className="save-address-note"><Check size={13}/> These details will be saved to your account.</small>}</div>
           <div className="review-block"><h2>Payment</h2><p><Banknote size={17}/> Cash on delivery</p></div>
-          <div className="review-block"><h2>Items</h2>{grouped.map(item=><div className="review-item" key={item.variantId}><img src={item.image}/><div><b>{item.name}</b><span>{item.color} / {item.size} · Qty {item.quantity}</span></div><strong>{pkr(item.price*item.quantity)}</strong></div>)}</div>
+          <div className="review-block"><h2>Items</h2>{grouped.map(item=><div className="review-item" key={item.groupKey}><img src={item.customization?.design||item.image}/><div><b>{item.name}</b><span>{item.color} / {item.size} · Qty {item.quantity}{item.customization?.sleeve&&` · ${item.customization.sleeve} sleeve`}</span>{item.customization?.name_engraving&&<small>Engraving: {item.customization.name_engraving}</small>}</div><strong>{pkr(item.price*item.quantity)}</strong></div>)}</div>
           {error&&<div className="auth-error">{error}</div>}<button className="primary confirm-order" disabled={placing} onClick={confirm}>{placing?"Placing order…":"Confirm cash on delivery order"} <ArrowRight size={17}/></button>
         </div>}
       </section>
-      <aside className="checkout-summary"><h2>Order summary</h2>{grouped.map(item=><div className="summary-item" key={item.variantId}><span>{item.name} <small>× {item.quantity}</small></span><b>{pkr(item.price*item.quantity)}</b></div>)}<div className="summary-line"><span>Subtotal</span><b>{pkr(subtotal)}</b></div><div className="summary-line"><span>Delivery</span><b>{pkr(delivery)}</b></div><div className="summary-total"><span>Total</span><b>{pkr(total)}</b></div><p>Taxes, if applicable, are included.</p></aside>
+      <aside className="checkout-summary"><h2>Order summary</h2>{grouped.map(item=><div className="summary-item" key={item.groupKey}><span>{item.name} <small>× {item.quantity}</small></span><b>{pkr(item.price*item.quantity)}</b></div>)}<div className="summary-line"><span>Subtotal</span><b>{pkr(subtotal)}</b></div><div className="summary-line"><span>Delivery</span><b>{pkr(delivery)}</b></div><div className="summary-total"><span>Total</span><b>{pkr(total)}</b></div><p>Taxes, if applicable, are included.</p></aside>
     </div>
   </main>;
 }
@@ -478,6 +595,7 @@ function AdminOrderEditor({order,onUpdated}) {
   };
   return <article className="admin-order-card">
     <div className="admin-order-summary"><div><small>ORDER</small><b>#{order.id.slice(0,8).toUpperCase()}</b></div><div><small>RECEIVED</small><span>{new Date(order.created_at).toLocaleDateString("en-PK")}</span></div><strong>{pkr(order.total_amount)}</strong></div>
+    <div className="admin-order-items">{(order.order_items||[]).map(item=>{const custom=item.customization||{};return <div key={item.id}><b>{item.product_variants?.products?.name||"Product"} × {item.quantity}</b><span>{[custom.gender,item.product_variants?.size,item.product_variants?.colors?.name,custom.sleeve&&`${custom.sleeve} sleeve`,custom.trouser_style].filter(Boolean).join(" · ")}</span>{custom.name_engraving&&<small>Name engraving: {custom.name_engraving}</small>}{custom.logo_engraving?.url&&<a href={custom.logo_engraving.url} target="_blank" rel="noreferrer">View customer logo</a>}{Object.keys(custom.measurements||{}).length>0&&<small>Custom measurements: {Object.entries(custom.measurements).filter(([,value])=>value).map(([key,value])=>`${key.replaceAll("_"," ")} ${value}″`).join(", ")}</small>}</div>})}</div>
     <div className="admin-order-controls">
       <label>Status<select value={status} disabled={["cancelled","refunded"].includes(order.status)} onChange={event=>setStatus(event.target.value)}>{!adminOrderStatuses.some(([value])=>value===status)&&<option value={status}>{status}</option>}{adminOrderStatuses.map(([value,label])=><option value={value} key={value}>{label}</option>)}</select></label>
       <label className="admin-order-message">Custom message <small>{message.length}/500</small><textarea rows="2" maxLength="500" value={message} onChange={event=>setMessage(event.target.value)} placeholder="Optional update visible to the customer"/></label>
@@ -498,8 +616,11 @@ function Admin({ user, profile, authReady, onLogin, products, onCreated }) {
   const [saving,setSaving] = useState(false);
   const [formError,setFormError] = useState("");
   const [formSuccess,setFormSuccess] = useState("");
-  const [form,setForm] = useState({name:"",description:"",category_id:"",cloth_type_id:"",gender:"unisex",base_price:"",is_featured:false});
-  const [variants,setVariants] = useState([{color_id:"",size:"M",sku:"",stock_quantity:"0",price_override:""}]);
+  const [form,setForm] = useState({name:"",description:"",category_id:"",cloth_type_id:"",gender:"unisex",product_mode:"style",base_price:"",is_featured:false});
+  const [selectedColors,setSelectedColors] = useState([]);
+  const [sizes,setSizes] = useState("XS, S, M, L, XL");
+  const [variantDefaults,setVariantDefaults] = useState({stock_quantity:"0",price_override:""});
+  const [existingVariants,setExistingVariants] = useState([]);
   const loadAdminData = () => fetchAdminData().then(setAdminData).catch(error=>setFormError(error.message));
   useEffect(() => {
     if (user && ["admin","staff"].includes(profile?.role)) {
@@ -514,24 +635,25 @@ function Admin({ user, profile, authReady, onLogin, products, onCreated }) {
     catch (error) { setUploadError(error.message); }
     finally { setUploading(false); event.target.value = ""; }
   };
-  const updateVariant = (index,key,value) => setVariants(rows => rows.map((row,i)=>i===index?{...row,[key]:value}:row));
   const resetEditor = () => {
     setEditingId(null); setExistingImage(null); setUploadResult(null); setUploadError(""); setFormError(""); setFormSuccess("");
-    setForm({name:"",description:"",category_id:"",cloth_type_id:"",gender:"unisex",base_price:"",is_featured:false});
-    setVariants([{color_id:"",size:"M",sku:"",stock_quantity:"0",price_override:""}]);
+    setForm({name:"",description:"",category_id:"",cloth_type_id:"",gender:"unisex",product_mode:"style",base_price:"",is_featured:false});
+    setSelectedColors([]); setSizes("XS, S, M, L, XL"); setVariantDefaults({stock_quantity:"0",price_override:""}); setExistingVariants([]);
   };
   const openNew = () => { resetEditor(); setShowForm(true); };
   const openEdit = product => {
     setEditingId(product.id); setExistingImage({url:product.originalImage,fileId:product.imageFileId});
-    setForm({name:product.name,description:product.description||"",category_id:product.categoryId||"",cloth_type_id:product.clothTypeId||"",gender:product.gender.toLowerCase(),base_price:String(product.price),is_featured:product.isFeatured});
-    setVariants(product.variants.map(v=>({color_id:v.colors?.id||"",size:v.size,sku:v.sku,stock_quantity:String(v.stock_quantity),price_override:v.price_override==null?"":String(v.price_override)})));
+    setForm({name:product.name,description:product.description||"",category_id:product.categoryId||"",cloth_type_id:product.clothTypeId||"",gender:product.gender.toLowerCase(),product_mode:product.productMode||"style",base_price:String(product.price),is_featured:product.isFeatured});
+    setExistingVariants(product.variants);
+    setSelectedColors([...new Set(product.variants.map(v=>v.colors?.id).filter(Boolean))]);
+    setSizes([...new Set(product.variants.map(v=>v.size).filter(Boolean))].join(", "));
+    setVariantDefaults({stock_quantity:String(product.variants[0]?.stock_quantity??0),price_override:product.variants[0]?.price_override==null?"":String(product.variants[0].price_override)});
     setUploadResult(null); setFormError(""); setFormSuccess(""); setShowForm(true); window.scrollTo({top:0,behavior:"smooth"});
   };
   const removeProduct = async product => {
-    if (!window.confirm(`Delete “${product.name}”? This cannot be undone.`)) return;
+    if (!window.confirm(`Remove “${product.name}” from the store? Existing orders will be preserved.`)) return;
     setFormError("");
     try {
-      if (product.imageFileId) await deleteFromImageKit(product.imageFileId);
       await deleteProduct(product.id);
       await onCreated();
     } catch (error) { setFormError(error.message); }
@@ -540,18 +662,27 @@ function Admin({ user, profile, authReady, onLogin, products, onCreated }) {
     event.preventDefault(); setSaving(true); setFormError(""); setFormSuccess("");
     try {
       if (!uploadResult && !existingImage?.url) throw new Error("Upload at least one product image.");
-      if (!variants.length || variants.some(v=>!v.color_id||!v.size||!v.sku)) throw new Error("Complete every variant row.");
+      const sizeOptions = [...new Set(sizes.split(",").map(value=>value.trim()).filter(Boolean))];
+      if (!selectedColors.length) throw new Error("Select at least one colour.");
+      if (!sizeOptions.length) throw new Error("Enter at least one size.");
+      const skuRoot = `${slugify(form.name)}-${editingId?.slice(0,6)||Date.now().toString().slice(-6)}`;
+      const generatedVariants = selectedColors.flatMap(colorId=>sizeOptions.map(size=>{
+        const previous = existingVariants.find(v=>v.colors?.id===colorId&&v.size===size);
+        return {
+          color_id:colorId,size,
+          sku:previous?.sku||`${skuRoot}-${colorId.slice(0,4)}-${slugify(size)}`,
+          stock_quantity:previous?.stock_quantity??Number(variantDefaults.stock_quantity),
+          price_override:previous?.price_override??(variantDefaults.price_override?Number(variantDefaults.price_override):null),is_active:true
+        };
+      }));
       const payload = {
         product: {
           name: form.name.trim(), slug: `${slugify(form.name)}-${Date.now().toString().slice(-6)}`,
           description: form.description.trim(), category_id: form.category_id,
-          cloth_type_id: form.cloth_type_id || null, gender: form.gender,
+          cloth_type_id: form.cloth_type_id || null, gender: form.gender, product_mode:form.product_mode,
           base_price: Number(form.base_price), is_active: true, is_featured: form.is_featured
         },
-        variants: variants.map(v=>({
-          color_id:v.color_id,size:v.size.trim(),sku:v.sku.trim(),
-          stock_quantity:Number(v.stock_quantity),price_override:v.price_override?Number(v.price_override):null,is_active:true
-        })),
+        variants: generatedVariants,
         image: uploadResult
       };
       if (editingId) {
@@ -579,27 +710,26 @@ function Admin({ user, profile, authReady, onLogin, products, onCreated }) {
         <label>Category *<select value={form.category_id} onChange={e=>setForm({...form,category_id:e.target.value})} required><option value="">Choose category</option>{adminData.categories.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
         <label>Cloth type<select value={form.cloth_type_id} onChange={e=>setForm({...form,cloth_type_id:e.target.value})}><option value="">Choose fabric</option>{adminData.clothTypes.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
         <label>Gender fit<select value={form.gender} onChange={e=>setForm({...form,gender:e.target.value})}><option value="unisex">Unisex</option><option value="women">Women</option><option value="men">Men</option></select></label>
+        <label>Product page type<select value={form.product_mode} onChange={e=>setForm({...form,product_mode:e.target.value})}><option value="style">Style-based (choose colour)</option><option value="colour">Colour-based (choose design)</option></select></label>
         <label className="check-label"><input type="checkbox" checked={form.is_featured} onChange={e=>setForm({...form,is_featured:e.target.checked})}/> Feature on homepage</label>
         <label className="editor-wide">Description<textarea rows="4" value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
       </div>
       <div className="editor-section"><div><h3>Product image *</h3><p>JPEG, PNG, WebP, or AVIF. Uploaded securely to ImageKit.</p></div><label className="primary upload-button">{uploading?"Uploading…":uploadResult||existingImage?.url?"Replace image":"Choose image"}<input type="file" accept="image/jpeg,image/png,image/webp,image/avif" disabled={uploading} onChange={uploadImage}/></label>{(uploadResult||existingImage?.url)&&<div className="upload-result"><Check/><img src={uploadResult?.thumbnailUrl||uploadResult?.url||existingImage.url}/><span>{uploadResult?"New image ready":"Current image"}</span></div>}</div>
       {uploadError&&<div className="auth-error">{uploadError}</div>}
-      <div className="variants-head"><div><h3>Variants *</h3><p>Add each color and size combination with its own SKU and stock.</p></div><button type="button" onClick={()=>setVariants(v=>[...v,{color_id:"",size:"M",sku:"",stock_quantity:"0",price_override:""}])}><Plus size={15}/> Add variant</button></div>
-      <div className="variant-table">{variants.map((v,i)=><div className="variant-row" key={i}>
-        <select value={v.color_id} onChange={e=>updateVariant(i,"color_id",e.target.value)} required><option value="">Color</option>{adminData.colors.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select>
-        <input placeholder="Size" value={v.size} onChange={e=>updateVariant(i,"size",e.target.value)} required/>
-        <input placeholder="SKU" value={v.sku} onChange={e=>updateVariant(i,"sku",e.target.value)} required/>
-        <input type="number" min="0" placeholder="Stock" value={v.stock_quantity} onChange={e=>updateVariant(i,"stock_quantity",e.target.value)} required/>
-        <input type="number" min="0" step=".01" placeholder="Price override" value={v.price_override} onChange={e=>updateVariant(i,"price_override",e.target.value)}/>
-        <button type="button" aria-label="Remove variant" disabled={variants.length===1} onClick={()=>setVariants(rows=>rows.filter((_,x)=>x!==i))}><Trash2 size={16}/></button>
-      </div>)}</div>
+      <div className="variants-head"><div><h3>Colours and sizes *</h3><p>Select colours and enter sizes independently. The store creates all available combinations automatically.</p></div></div>
+      <div className="independent-options">
+        <fieldset><legend>Available colours</legend><div className="admin-color-grid">{adminData.colors.map(color=><label key={color.id}><input type="checkbox" checked={selectedColors.includes(color.id)} onChange={()=>setSelectedColors(current=>current.includes(color.id)?current.filter(id=>id!==color.id):[...current,color.id])}/><i style={{background:color.hex}}/>{color.name}</label>)}</div></fieldset>
+        <label>Available sizes <small>Separate sizes with commas</small><input value={sizes} onChange={event=>setSizes(event.target.value)} placeholder="XS, S, M, L, XL"/></label>
+        <label>Initial stock per new combination<input type="number" min="0" value={variantDefaults.stock_quantity} onChange={event=>setVariantDefaults(current=>({...current,stock_quantity:event.target.value}))}/></label>
+        <label>Price override for new combinations <small>Optional</small><input type="number" min="0" step=".01" value={variantDefaults.price_override} onChange={event=>setVariantDefaults(current=>({...current,price_override:event.target.value}))}/></label>
+      </div>
       {formError&&<div className="auth-error">{formError}</div>}{formSuccess&&<div className="auth-message">{formSuccess}</div>}
       <div className="editor-actions"><button type="button" onClick={()=>{resetEditor();setShowForm(false)}}>Cancel</button><button className="primary" disabled={saving||uploading}>{saving?"Saving…":editingId?"Save changes":"Publish product"} <ArrowRight size={16}/></button></div>
     </form>}
     <div className="metrics">{metrics.map((m,i)=><div key={m[0]}><span>{i===0?<BarChart3/>:i===1?<ShoppingBag/>:i===2?<Package/>:<Sparkles/>}</span><p>{m[0]}</p><h2>{m[1]}</h2><small>{m[2]}</small></div>)}</div>
     <section className="admin-orders-panel"><div className="panel-head"><div><p className="eyebrow">FULFILMENT</p><h2>Manage received orders</h2></div><span>{adminData.orders.length} recent</span></div>{adminData.orders.length?<div className="admin-order-list">{adminData.orders.map(order=><AdminOrderEditor key={order.id} order={order} onUpdated={loadAdminData}/>)}</div>:<div className="admin-empty">No orders yet.</div>}</section>
     <section className="inventory-panel"><div className="panel-head"><h2>Inventory alerts</h2></div>{products.filter(p=>p.stock<10).length?products.filter(p=>p.stock<10).map(p=><div className="stock-row" key={p.id}>{p.image&&<img src={p.image}/>}<div><b>{p.name}</b><span>{p.colors.join(", ")}</span></div><strong>{p.stock} left</strong></div>):<div className="admin-empty">No low-stock products.</div>}</section>
-    <section className="admin-products"><div className="panel-head"><h2>Live products</h2><span>{products.length} total</span></div>{products.length?<div className="product-table product-actions-table"><div className="table-header"><span>Product</span><span>Category</span><span>Stock</span><span>Price</span><span>Status</span><span>Actions</span></div>{products.map(p=><div key={p.id}><span>{p.image&&<img src={p.image}/>}<b>{p.name}</b></span><span>{p.category}</span><span>{p.stock}</span><span>{pkr(p.price)}</span><span className="active"><i/> Active</span><span className="row-actions"><button onClick={()=>openEdit(p)}>Edit</button><button onClick={()=>removeProduct(p)}><Trash2 size={14}/> Delete</button></span></div>)}</div>:<div className="admin-empty large">No products yet. Use “Add product” to publish your first item.</div>}</section>
+    <section className="admin-products"><div className="panel-head"><h2>Live products</h2><span>{products.length} total</span></div>{products.length?<div className="product-table product-actions-table"><div className="table-header"><span>Product</span><span>Category</span><span>Stock</span><span>Price</span><span>Status</span><span>Actions</span></div>{products.map(p=><div key={p.id}><span>{p.image&&<img src={p.image}/>}<b>{p.name}</b></span><span>{p.category}</span><span>{p.stock}</span><span>{pkr(p.price)}</span><span className="active"><i/> Active</span><span className="row-actions"><button onClick={()=>openEdit(p)}>Edit</button><button onClick={()=>removeProduct(p)}><Trash2 size={14}/> Archive</button></span></div>)}</div>:<div className="admin-empty large">No products yet. Use “Add product” to publish your first item.</div>}</section>
   </main>;
 }
 
@@ -629,8 +759,8 @@ function ContactPage() {
   </main>;
 }
 
-function Footer({goShop,onNavigate}) {
-  return <footer><div className="footer-brand"><img className="brand-logo footer-logo" src="/media/medz-logo.png" alt="Medz Apparel"/><h2>MEDZAPPERAL</h2><p>Made for the shift.<br/>Designed for what matters.</p></div><div><h3>Shop</h3>{["Scrubs","Lab Coats","Jackets","Accessories"].map(x=><button key={x} onClick={()=>goShop(x)}>{x}</button>)}</div><div><h3>Help</h3><button onClick={()=>onNavigate("terms")}>Terms & exchanges</button><button onClick={()=>onNavigate("shipping")}>Shipping policy</button><button onClick={()=>onNavigate("privacy")}>Privacy policy</button><button onClick={()=>onNavigate("contact")}>Contact us</button></div><div><h3>Follow</h3><a href="https://www.facebook.com/profile.php?id=100093355088786" target="_blank" rel="noreferrer">Facebook</a><a href="https://www.instagram.com/medz_apparel/" target="_blank" rel="noreferrer">Instagram</a><a href="https://wa.me/message/AMSQ2CXELSP5C1" target="_blank" rel="noreferrer">WhatsApp</a></div><div className="footer-bottom"><span>© 2026 MEDZAPPERAL</span><span><button onClick={()=>onNavigate("privacy")}>Privacy</button> · <button onClick={()=>onNavigate("terms")}>Terms</button> · Accessibility</span></div></footer>;
+function Footer({goShop,onNavigate,categories=[]}) {
+  return <footer><div className="footer-brand"><img className="brand-logo footer-logo" src="/media/medz-logo.png" alt="Medz Apparel"/><h2>MEDZ APPAREL</h2><p>The Doctor&apos;s Thread</p></div><div><h3>Shop</h3>{categories.slice(0,5).map(item=><button key={item.id} onClick={()=>goShop(item.name)}>{item.name}</button>)}</div><div><h3>Help</h3><button onClick={()=>onNavigate("terms")}>Terms & exchanges</button><button onClick={()=>onNavigate("shipping")}>Shipping policy</button><button onClick={()=>onNavigate("privacy")}>Privacy policy</button><button onClick={()=>onNavigate("contact")}>Contact us</button></div><div><h3>Follow</h3><a href="https://www.facebook.com/profile.php?id=100093355088786" target="_blank" rel="noreferrer">Facebook</a><a href="https://www.instagram.com/medz_apparel/" target="_blank" rel="noreferrer">Instagram</a><a href="https://wa.me/message/AMSQ2CXELSP5C1" target="_blank" rel="noreferrer">WhatsApp</a></div><div className="footer-bottom"><span>© 2026 MEDZ APPAREL</span><span><button onClick={()=>onNavigate("privacy")}>Privacy</button> · <button onClick={()=>onNavigate("terms")}>Terms</button> · Accessibility</span></div></footer>;
 }
 
 createRoot(document.getElementById("root")).render(<App/>);

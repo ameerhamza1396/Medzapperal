@@ -6,11 +6,11 @@ export function imageKitUrl(url, width = 800, height) {
   return `${url}${url.includes("?") ? "&" : "?"}${transform}`;
 }
 
-export async function uploadToImageKit(file, folder = "/medzapperal/products") {
+export async function uploadToImageKit(file, folder = "/medzapperal/products", authEndpoint = "/api/imagekit-auth") {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error("Please sign in as an admin first.");
 
-  const authResponse = await fetch("/api/imagekit-auth", {
+  const authResponse = await fetch(authEndpoint, {
     headers: { Authorization: `Bearer ${session.access_token}` }
   });
   const authText = await authResponse.text();
@@ -24,7 +24,7 @@ export async function uploadToImageKit(file, folder = "/medzapperal/products") {
   const form = new FormData();
   form.append("file", file);
   form.append("fileName", file.name);
-  form.append("folder", folder);
+  form.append("folder", auth.folder || folder);
   form.append("publicKey", auth.publicKey);
   form.append("token", auth.token);
   form.append("expire", String(auth.expire));
@@ -41,6 +41,12 @@ export async function uploadToImageKit(file, folder = "/medzapperal/products") {
   catch { throw new Error("ImageKit returned an invalid upload response."); }
   if (!upload.ok) throw new Error(result.message || "ImageKit upload failed.");
   return { url: result.url, fileId: result.fileId, thumbnailUrl: result.thumbnailUrl };
+}
+
+export async function uploadCustomerLogo(file) {
+  if (!["image/png","image/jpeg","image/webp"].includes(file.type)) throw new Error("Upload a PNG, JPEG, or WebP logo.");
+  if (file.size > 2 * 1024 * 1024) throw new Error("Logo file must be 2 MB or smaller.");
+  return uploadToImageKit(file,"/medzapperal/customer-logos","/api/customer-imagekit-auth");
 }
 
 export async function deleteFromImageKit(fileId) {

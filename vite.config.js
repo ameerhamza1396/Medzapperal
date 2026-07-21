@@ -3,6 +3,17 @@ import react from "@vitejs/plugin-react";
 import crypto from "node:crypto";
 
 async function verifyStaff(request, env) {
+  const {user,token,supabaseUrl,anonKey}=await verifyUser(request,env);
+  const profileResponse = await fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${user.id}&select=role`, {
+    headers: { apikey: anonKey, Authorization: `Bearer ${token}`, Accept: "application/vnd.pgrst.object+json" }
+  });
+  if (!profileResponse.ok) throw new Error("Unable to verify account role");
+  const profile = await profileResponse.json();
+  if (!["admin", "staff"].includes(profile.role)) throw new Error("Forbidden");
+  return {user};
+}
+
+async function verifyUser(request,env) {
   const token = request.headers.authorization?.replace(/^Bearer\s+/i, "");
   const supabaseUrl = env.SUPABASE_URL || env.VITE_SUPABASE_URL;
   const anonKey = env.SUPABASE_ANON_KEY || env.VITE_SUPABASE_ANON_KEY;
@@ -12,12 +23,7 @@ async function verifyStaff(request, env) {
   });
   if (!userResponse.ok) throw new Error("Unauthorized");
   const user = await userResponse.json();
-  const profileResponse = await fetch(`${supabaseUrl}/rest/v1/profiles?id=eq.${user.id}&select=role`, {
-    headers: { apikey: anonKey, Authorization: `Bearer ${token}`, Accept: "application/vnd.pgrst.object+json" }
-  });
-  if (!profileResponse.ok) throw new Error("Unable to verify account role");
-  const profile = await profileResponse.json();
-  if (!["admin", "staff"].includes(profile.role)) throw new Error("Forbidden");
+  return {user,token,supabaseUrl,anonKey};
 }
 
 function json(response, status, body) {
@@ -44,21 +50,21 @@ function localImageKitApi(env) {
     configureServer(server) {
       server.middlewares.use(async (request, response, next) => {
         const path = request.url?.split("?")[0];
-        if (!["/api/imagekit-auth", "/api/imagekit-delete"].includes(path)) return next();
+        if (!["/api/imagekit-auth", "/api/customer-imagekit-auth", "/api/imagekit-delete"].includes(path)) return next();
         try {
-          await verifyStaff(request, env);
+          const verified = path === "/api/customer-imagekit-auth" ? await verifyUser(request,env) : await verifyStaff(request, env);
           const privateKey = env.IMAGEKIT_PRIVATE_KEY;
           const publicKey = env.IMAGEKIT_PUBLIC_KEY;
           const urlEndpoint = env.IMAGEKIT_URL_ENDPOINT;
           if (!privateKey || !publicKey || !urlEndpoint) {
             return json(response, 500, { error: "ImageKit environment variables are missing from .env.local." });
           }
-          if (path === "/api/imagekit-auth") {
+          if (path === "/api/imagekit-auth" || path === "/api/customer-imagekit-auth") {
             if (request.method !== "GET") return json(response, 405, { error: "Method not allowed" });
             const token = crypto.randomBytes(32).toString("hex");
             const expire = Math.floor(Date.now() / 1000) + 20 * 60;
             const signature = crypto.createHmac("sha1", privateKey).update(token + expire).digest("hex");
-            return json(response, 200, { token, expire, signature, publicKey, urlEndpoint });
+            return json(response, 200, { token, expire, signature, publicKey, urlEndpoint, ...(path === "/api/customer-imagekit-auth" ? {folder:`/medzapperal/customer-logos/${verified.user.id}`} : {}) });
           }
           if (request.method !== "DELETE") return json(response, 405, { error: "Method not allowed" });
           const { fileId } = await readBody(request);

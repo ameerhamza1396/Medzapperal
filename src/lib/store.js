@@ -6,8 +6,8 @@ export async function fetchCatalog() {
   const { data, error } = await supabase
     .from("products")
     .select(`
-      id, name, slug, description, gender, base_price, is_featured, created_at, category_id, cloth_type_id,
-      categories(name),
+      id, name, slug, description, gender, product_mode, base_price, is_featured, created_at, category_id, cloth_type_id,
+      categories(name,slug,image_url),
       cloth_types(name),
       product_images(id, url, file_id, sort_order, variant_id),
       product_variants(id, size, sku, stock_quantity, price_override, is_active, colors(id, name, hex))
@@ -26,15 +26,20 @@ export async function fetchCatalog() {
       slug: product.slug,
       description: product.description,
       category: product.categories?.name || "Uncategorized",
+      categorySlug: product.categories?.slug || "",
       categoryId: product.category_id,
       fabric: product.cloth_types?.name || "Not specified",
       clothTypeId: product.cloth_type_id,
       gender: product.gender === "men" ? "Men" : product.gender === "women" ? "Women" : "Unisex",
+      productMode: product.product_mode || "style",
       price: Number(product.base_price),
       colors,
       sizes: unique("size"),
       stock: variants.reduce((sum,v) => sum + v.stock_quantity, 0),
       image: imageKitUrl(primaryImage, 900, 1100),
+      images: [...(product.product_images || [])].sort((a,b) => a.sort_order-b.sort_order).map(item => ({
+        id:item.id, url:imageKitUrl(item.url,900,1125), originalUrl:item.url, fileId:item.file_id
+      })),
       originalImage: primaryImage,
       imageFileId: [...(product.product_images || [])].sort((a,b) => a.sort_order-b.sort_order)[0]?.file_id,
       variants,
@@ -45,15 +50,43 @@ export async function fetchCatalog() {
   });
 }
 
+export async function fetchStorefrontContent() {
+  if (!supabase) return { categories: [], reviews: [] };
+  const [categoryResult, reviewResult] = await Promise.all([
+    supabase.from("categories").select("id,name,slug,parent_id,image_url,sort_order,is_active").eq("is_active",true).order("sort_order"),
+    supabase.from("customer_reviews").select("id,title,image_url,sort_order").eq("is_active",true).order("sort_order").limit(12)
+  ]);
+  if (categoryResult.error) throw categoryResult.error;
+  return {
+    categories: categoryResult.data || [],
+    reviews: reviewResult.error ? [] : reviewResult.data || []
+  };
+}
+
 export async function updateProductWithVariants({ id, product, variants, image }) {
   const { error: productError } = await supabase.from("products").update(product).eq("id", id);
   if (productError) throw productError;
-  const { error: deleteError } = await supabase.from("product_variants").delete().eq("product_id", id);
-  if (deleteError) throw deleteError;
-  const { error: variantError } = await supabase.from("product_variants").insert(
-    variants.map(v => ({ ...v, product_id: id }))
-  );
-  if (variantError) throw variantError;
+  const { data: existing, error: existingError } = await supabase
+    .from("product_variants").select("id,color_id,size,sku").eq("product_id", id);
+  if (existingError) throw existingError;
+  const retainedIds = [];
+  for (const variant of variants) {
+    const match = (existing || []).find(row => row.color_id === variant.color_id && row.size === variant.size);
+    if (match) {
+      retainedIds.push(match.id);
+      const { error } = await supabase.from("product_variants").update({...variant,sku:match.sku,is_active:true}).eq("id",match.id);
+      if (error) throw error;
+    } else {
+      const { data, error } = await supabase.from("product_variants").insert({...variant,product_id:id}).select("id").single();
+      if (error) throw error;
+      retainedIds.push(data.id);
+    }
+  }
+  const retiredIds = (existing || []).filter(row=>!retainedIds.includes(row.id)).map(row=>row.id);
+  if (retiredIds.length) {
+    const { error } = await supabase.from("product_variants").update({is_active:false,stock_quantity:0}).in("id",retiredIds);
+    if (error) throw error;
+  }
   if (image) {
     const { error: imageDeleteError } = await supabase.from("product_images").delete().eq("product_id", id);
     if (imageDeleteError) throw imageDeleteError;
@@ -65,7 +98,7 @@ export async function updateProductWithVariants({ id, product, variants, image }
 }
 
 export async function deleteProduct(id) {
-  const { error } = await supabase.from("products").delete().eq("id", id);
+  const { error } = await supabase.from("products").update({is_active:false}).eq("id", id);
   if (error) throw error;
 }
 
@@ -76,7 +109,11 @@ export async function archiveProduct(id) {
 
 export async function placeCodOrder({ shippingAddress, items }) {
   if (!supabase) throw new Error("Supabase is not configured.");
-  const payload = items.map(item => ({ variant_id: item.variantId, quantity: item.quantity }));
+  const payload = items.map(item => ({
+    variant_id: item.variantId,
+    quantity: item.quantity,
+    customization: item.customization || {}
+  }));
   const { data, error } = await supabase.rpc("place_cod_order", {
     p_shipping_address: shippingAddress,
     p_items: payload
@@ -120,7 +157,7 @@ export async function fetchCustomerAccount(userId) {
       .from("orders")
       .select(`
         id,status,total_amount,shipping_address,internal_notes,created_at,updated_at,
-        order_items(id,quantity,unit_price,product_variants(size,colors(name),products(name,product_images(url,sort_order))))
+        order_items(id,quantity,unit_price,customization,product_variants(size,colors(name),products(name,product_images(url,sort_order))))
       `)
       .eq("user_id", userId)
       .order("created_at", { ascending: false }),
@@ -161,7 +198,7 @@ export async function fetchAdminData() {
     supabase.from("categories").select("id,name,slug").order("sort_order"),
     supabase.from("colors").select("id,name,hex").order("name"),
     supabase.from("cloth_types").select("id,name").order("name"),
-    supabase.from("orders").select("id,status,total_amount,internal_notes,created_at,updated_at").order("created_at",{ascending:false}).limit(10)
+    supabase.from("orders").select("id,status,total_amount,shipping_address,internal_notes,created_at,updated_at,order_items(id,quantity,unit_price,customization,product_variants(size,colors(name),products(name)))").order("created_at",{ascending:false}).limit(10)
   ]);
   for (const result of [categories, colors, clothTypes, orders]) if (result.error) throw result.error;
   return {
