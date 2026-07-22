@@ -30,6 +30,7 @@ export async function fetchCatalog() {
       categoryId: product.category_id,
       fabric: product.cloth_types?.name || "Not specified",
       clothTypeId: product.cloth_type_id,
+      genderValue: product.gender,
       gender: product.gender === "men" ? "Men" : product.gender === "women" ? "Women" : "Unisex",
       productMode: product.product_mode || "style",
       price: Number(product.base_price),

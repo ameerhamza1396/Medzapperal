@@ -370,7 +370,7 @@ function Reviews({reviews}) {
 function ProductCard({p,openProduct,add}) {
   return <article className="product-card">
     <button className="product-image" onClick={() => openProduct(p)}>{p.image ? <img src={p.image} alt={p.name}/> : <span className="image-placeholder"><Package/></span>}{p.badge && <span className="badge">{p.badge}</span>}<span className="quick" onClick={e => {e.stopPropagation(); add(p)}}><Plus size={18}/> Quick add</span></button>
-    <div className="product-meta"><button onClick={() => openProduct(p)}><strong>{p.name}</strong><span>{p.gender} · {p.fabric}</span></button><b>{pkr(p.price)}</b></div>
+    <div className="product-meta"><button onClick={() => openProduct(p)}><strong>{p.name}</strong><span>{p.gender === "Unisex" ? "Men & Women" : p.gender} · {p.fabric}</span></button><b>{pkr(p.price)}</b></div>
     <div className="swatches">{p.colors.map(c => <i key={c} style={{background:p.variants.find(variant=>variant.colors?.name===c)?.colors?.hex||palette[c]||"#777"}} title={c}/>)}</div>
   </article>;
 }
@@ -420,9 +420,10 @@ function Filter({title,options,value,set,swatch}) {
 }
 
 function Product({product,add,openProduct,products}) {
+  const genderOptions = product.gender === "Unisex" ? ["Men","Women"] : [product.gender];
   const [color,setColor] = useState(product.colors[0]);
   const [size,setSize] = useState(product.sizes[0]);
-  const [gender,setGender] = useState(product.gender);
+  const [gender,setGender] = useState(genderOptions[0]);
   const [qty,setQty] = useState(1);
   const [customize,setCustomize] = useState(false);
   const [sleeve,setSleeve] = useState("Half");
@@ -439,7 +440,7 @@ function Product({product,add,openProduct,products}) {
   const galleryImages = product.images?.length ? product.images : [{id:"primary",url:product.image}];
   const colourBased = product.productMode === "colour";
   const measurementFee = customize&&customSizing ? Object.values(measurements).filter(value=>String(value).trim()).length*100 : 0;
-  useEffect(()=>{setColor(product.colors[0]);setSize(product.sizes[0]);setGender(product.gender);setQty(1);setDesign(product.images?.[0]?.url||product.image);setCustomize(false)},[product]);
+  useEffect(()=>{setColor(product.colors[0]);setSize(product.sizes[0]);setGender(product.gender === "Unisex" ? "Men" : product.gender);setQty(1);setDesign(product.images?.[0]?.url||product.image);setCustomize(false)},[product]);
   const customization = customize ? {
     gender,sleeve,
     name_engraving:nameEngraving ? engravingName.trim() : null,
@@ -460,9 +461,9 @@ function Product({product,add,openProduct,products}) {
     <div className="product-layout">
       <div className="product-gallery-wrap"><div className="gallery"><img src={design||product.image} alt={product.name}/><div className="gallery-count">{String(Math.max(1,galleryImages.findIndex(item=>item.url===design)+1)).padStart(2,"0")} / {String(galleryImages.length).padStart(2,"0")}</div></div>{galleryImages.length>1&&<div className="design-gallery" aria-label={colourBased?"Choose a design":"Product gallery"}>{galleryImages.slice(0,8).map((image,index)=><button className={design===image.url?"selected":""} key={image.id} onClick={()=>setDesign(image.url)}><img src={image.url} alt={`${product.name} view ${index+1}`}/><span>{index+1}</span></button>)}</div>}</div>
       <div className="product-info">
-        <p className="eyebrow">{product.category} · {product.gender}</p><h1>{product.name}</h1><p className="price">{pkr(product.price)}</p>
+        <p className="eyebrow">{product.category} · {product.gender === "Unisex" ? "Men & Women" : product.gender}</p><h1>{product.name}</h1><p className="price">{pkr(product.price)}</p>
         <p className="description">Polished enough for rounds, comfortable enough for the longest shift. Crafted in our signature {product.fabric.toLowerCase()} fabric with a clean, easy fit and thoughtfully placed utility.</p>
-        <div className="selector"><div><b>Gender</b><span>{gender}</span></div><div className="size-options">{["Women","Men","Unisex"].map(option=><button key={option} className={gender===option?"selected":""} onClick={()=>setGender(option)}>{option}</button>)}</div></div>
+        <div className="selector"><div><b>Gender</b><span>{gender}</span></div><div className="size-options">{genderOptions.map(option=><button key={option} className={gender===option?"selected":""} onClick={()=>setGender(option)}>{option}</button>)}</div></div>
         {!colourBased&&<div className="selector"><div><b>Colour</b><span>{color}</span></div><div className="color-options">{product.colors.map(c=><button key={c} className={color===c?"selected":""} onClick={()=>setColor(c)} style={{"--swatch":product.variants.find(variant=>variant.colors?.name===c)?.colors?.hex||palette[c]||"#888"}} aria-label={c}/>)}</div></div>}
         <div className="selector"><div><b>Size</b><button className="underlined" onClick={()=>setSizeChart(true)}>Size chart</button></div><div className="size-options">{product.sizes.map(s=><button key={s} className={size===s?"selected":""} onClick={()=>setSize(s)}>{s}</button>)}</div></div>
         <section className="customization-panel"><div className="customization-head"><div><b>Customize this item</b><span>Optional sleeves, engraving, measurements and trouser style</span></div><div className="yes-no"><button className={!customize?"selected":""} onClick={()=>setCustomize(false)}>No</button><button className={customize?"selected":""} onClick={()=>setCustomize(true)}>Yes</button></div></div>{customize&&<div className="customization-fields">
@@ -660,7 +661,7 @@ function Admin({ user, profile, authReady, catalogLoading, onLogin, products, on
     setEditingId(product.id);
     setProductImages(product.images.map(image=>({url:image.originalUrl||image.url,fileId:image.fileId,thumbnailUrl:image.url,isNew:false})));
     setRemovedImageFileIds([]);
-    setForm({name:product.name,description:product.description||"",category_id:product.categoryId||"",cloth_type_id:product.clothTypeId||"",gender:product.gender.toLowerCase(),product_mode:product.productMode||"style",base_price:String(product.price),is_featured:product.isFeatured});
+    setForm({name:product.name,description:product.description||"",category_id:product.categoryId||"",cloth_type_id:product.clothTypeId||"",gender:product.genderValue||product.gender.toLowerCase(),product_mode:product.productMode||"style",base_price:String(product.price),is_featured:product.isFeatured});
     setExistingVariants(product.variants);
     setSelectedColors([...new Set(product.variants.map(v=>v.colors?.id).filter(Boolean))]);
     setSizes([...new Set(product.variants.map(v=>v.size).filter(Boolean))].join(", "));
