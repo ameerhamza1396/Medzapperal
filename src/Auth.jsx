@@ -1,9 +1,17 @@
 import React, { useEffect, useState } from "react";
-import { ArrowRight, CalendarDays, Check, KeyRound, LoaderCircle, LogOut, Mail, MapPin, Package, Phone, RefreshCw, ShieldCheck, Truck, UserRound, XCircle } from "lucide-react";
+import { ArrowRight, CalendarDays, Check, KeyRound, LogOut, Mail, MapPin, Package, Phone, RefreshCw, ShieldCheck, Truck, UserRound, XCircle } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
 import { cancelPendingOrder, fetchCustomerAccount } from "./lib/store";
 
 const pkr = value => new Intl.NumberFormat("en-PK",{style:"currency",currency:"PKR",maximumFractionDigits:0}).format(Number(value)||0);
+const describeOrderDetails = (custom,variant) => [
+  custom?.gender,
+  custom?.color || variant?.colors?.name,
+  custom?.size || variant?.size,
+  custom?.sleeve && `${custom.sleeve} sleeve`,
+  custom?.trouser_style,
+  custom?.design && "Selected design"
+].filter(Boolean).join(" · ") || "Standard";
 const statusCopy = {
   pending: ["Order received","We have received your order and will begin processing it shortly."],
   paid: ["Payment confirmed","Your payment has been confirmed."],
@@ -13,6 +21,16 @@ const statusCopy = {
   cancelled: ["Cancelled","This order was cancelled."],
   refunded: ["Refunded","The refund for this order has been processed."]
 };
+
+function ProfileSkeleton() {
+  return <div className="profile-skeleton" aria-label="Loading account">
+    {Array.from({length:3},(_,index)=><article className="customer-order skeleton-card" key={index}>
+      <div className="customer-order-head"><div><span className="skeleton skeleton-line short"/><span className="skeleton skeleton-line medium"/></div><span className="skeleton skeleton-pill"/></div>
+      <div className="order-progress"><span className="skeleton skeleton-icon"/><div><span className="skeleton skeleton-line medium"/><span className="skeleton skeleton-line wide"/></div><span className="skeleton skeleton-line price"/></div>
+      <div className="account-order-item"><span className="skeleton skeleton-thumb"/><div><span className="skeleton skeleton-line medium"/><span className="skeleton skeleton-line wide"/></div><span className="skeleton skeleton-line price"/></div>
+    </article>)}
+  </div>;
+}
 
 export function AuthPage({ user, profile, onDone, onSignOut, onAdmin, onContact, onCheckout }) {
   const [mode, setMode] = useState("login");
@@ -112,18 +130,18 @@ export function AuthPage({ user, profile, onDone, onSignOut, onAdmin, onContact,
       <div className="profile-layout">
         <section className="profile-main">
           <div className="profile-section-head"><div><p className="eyebrow">ORDER HISTORY</p><h2>Your orders</h2></div><button className="icon-btn" aria-label="Refresh orders" onClick={loadAccount}><RefreshCw size={17}/></button></div>
-          {accountLoading ? <div className="profile-empty"><LoaderCircle className="spin"/> Loading your account…</div>
+          {accountLoading ? <ProfileSkeleton/>
           : accountData.orders.length ? <div className="customer-orders">{accountData.orders.map(order => {
             const [label,description] = statusCopy[order.status] || [order.status,"Your order status was updated."];
             return <article className="customer-order" key={order.id}>
               <div className="customer-order-head"><div><small>ORDER #{order.id.slice(0,8).toUpperCase()}</small><strong>{new Date(order.created_at).toLocaleDateString("en-PK",{day:"numeric",month:"short",year:"numeric"})}</strong></div><span className={`order-status ${order.status}`}>{label}</span></div>
               <div className="order-progress"><Package size={18}/><div><b>{label}</b><p>{description}</p>{order.customer_message&&<p className="customer-order-message">“{order.customer_message}”</p>}</div><strong>{pkr(order.total_amount)}</strong></div>
               {(order.order_items || []).map(item => {
-                const variant=item.product_variants; const product=variant?.products; const image=[...(product?.product_images||[])].sort((a,b)=>a.sort_order-b.sort_order)[0]?.url;
-                return <div className="account-order-item" key={item.id}>{image&&<img src={image} alt=""/>}<div><b>{product?.name || "Medz Apparel item"}</b><span>{[variant?.size,variant?.colors?.name].filter(Boolean).join(" · ")} · Qty {item.quantity}</span></div><strong>{pkr(Number(item.unit_price)*item.quantity)}</strong></div>;
+                const variant=item.product_variants; const product=variant?.products; const image=[...(product?.product_images||[])].sort((a,b)=>a.sort_order-b.sort_order)[0]?.url; const custom=item.customization||{};
+                return <div className="account-order-item" key={item.id}>{image&&<img src={image} alt=""/>}<div><b>{product?.name || "Medz Apparel item"}</b><span>{describeOrderDetails(custom,variant)} · Qty {item.quantity}</span>{custom.name_engraving&&<small>Engraving: {custom.name_engraving}</small>}{custom.logo_engraving?.url&&<small>Logo uploaded</small>}</div><strong>{pkr(Number(item.unit_price)*item.quantity)}</strong></div>;
               })}
               <div className="order-actions">{order.status === "pending"
-                ? <button className="danger-link" disabled={cancelling===order.id} onClick={()=>cancelOrder(order.id)}>{cancelling===order.id?<LoaderCircle className="spin" size={15}/>:<XCircle size={15}/>} Cancel order</button>
+                ? <button className="danger-link" disabled={cancelling===order.id} onClick={()=>cancelOrder(order.id)}>{cancelling===order.id?"Cancelling…":<><XCircle size={15}/> Cancel order</>}</button>
                 : !["cancelled","refunded","delivered"].includes(order.status) && <button onClick={onContact}><Phone size={15}/> Contact us to request cancellation</button>}
                 <span>Last updated {new Date(order.updated_at).toLocaleDateString("en-PK")}</span>
               </div>
@@ -153,7 +171,7 @@ export function AuthPage({ user, profile, onDone, onSignOut, onAdmin, onContact,
           <label>Verification code<input className="otp-input" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={otp} onChange={e => setOtp(e.target.value.replace(/\D/g, ""))} placeholder="000000" required /></label>
           {message && <div className="auth-message">{message}</div>}
           {error && <div className="auth-error">{error}</div>}
-          <button className="primary" disabled={loading || otp.length !== 6}>{loading ? <LoaderCircle className="spin"/> : "Verify account"} <ArrowRight size={17}/></button>
+          <button className="primary" disabled={loading || otp.length !== 6}>{loading ? "Verifying…" : "Verify account"} <ArrowRight size={17}/></button>
         </form>
         <button className="auth-link" onClick={resend}>Resend code</button>
       </> : <>
@@ -165,7 +183,7 @@ export function AuthPage({ user, profile, onDone, onSignOut, onAdmin, onContact,
           <label>Email address<div className="input-icon"><Mail size={16}/><input type="email" value={email} onChange={e=>setEmail(e.target.value)} autoComplete="email" required /></div></label>
           <label>Password<div className="input-icon"><KeyRound size={16}/><input type="password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete={mode === "login" ? "current-password" : "new-password"} minLength={8} required /></div></label>
           {error && <div className="auth-error">{error}</div>}
-          <button className="primary" disabled={loading}>{loading ? <LoaderCircle className="spin"/> : mode === "login" ? "Sign in" : "Create account"} <ArrowRight size={17}/></button>
+          <button className="primary" disabled={loading}>{loading ? mode === "login" ? "Signing in…" : "Creating…" : mode === "login" ? "Sign in" : "Create account"} <ArrowRight size={17}/></button>
         </form>
         <button className="auth-link" onClick={() => { setMode(mode === "login" ? "signup" : "login"); setError(""); }}>
           {mode === "login" ? "New here? Create an account" : "Already have an account? Sign in"}

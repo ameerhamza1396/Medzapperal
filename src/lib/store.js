@@ -6,7 +6,7 @@ export async function fetchCatalog() {
   const { data, error } = await supabase
     .from("products")
     .select(`
-      id, name, slug, description, gender, product_mode, base_price, is_featured, created_at, category_id, cloth_type_id,
+      id, name, slug, description, gender, product_mode, base_price, sale_price, is_featured, created_at, category_id, cloth_type_id,
       categories(name,slug,image_url),
       cloth_types(name),
       product_images(id, url, file_id, sort_order, variant_id),
@@ -33,7 +33,10 @@ export async function fetchCatalog() {
       genderValue: product.gender,
       gender: product.gender === "men" ? "Men" : product.gender === "women" ? "Women" : "Unisex",
       productMode: product.product_mode || "style",
-      price: Number(product.base_price),
+      price: Number(product.sale_price || product.base_price),
+      regularPrice: Number(product.base_price),
+      salePrice: product.sale_price == null ? null : Number(product.sale_price),
+      isOnSale: product.sale_price != null && Number(product.sale_price) < Number(product.base_price),
       colors,
       sizes: unique("size"),
       stock: variants.reduce((sum,v) => sum + v.stock_quantity, 0),
@@ -44,7 +47,7 @@ export async function fetchCatalog() {
       originalImage: primaryImage,
       imageFileId: [...(product.product_images || [])].sort((a,b) => a.sort_order-b.sort_order)[0]?.file_id,
       variants,
-      badge: product.is_featured ? "Featured" : null,
+      badge: product.sale_price != null && Number(product.sale_price) < Number(product.base_price) ? "Sale" : product.is_featured ? "Featured" : null,
       isFeatured: product.is_featured,
       createdAt: product.created_at
     };

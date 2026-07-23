@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import {
   ArrowLeft, ArrowRight, Banknote, BarChart3, Check, ChevronDown, CircleUserRound,
   CreditCard, Facebook, Heart, Instagram, LayoutGrid, Mail, MapPin, Menu, MessageCircle, Minus, Moon, Package, Phone, Plus, Ruler, Search, ShoppingBag,
-  ShieldCheck, SlidersHorizontal, Sparkles, Star, Sun, Trash2, Upload, X
+  Share2, ShieldCheck, SlidersHorizontal, Sparkles, Star, Sun, Trash2, Upload, X
 } from "lucide-react";
 import hero from "./assets/medzapperal-hero.png";
 import { AuthPage } from "./Auth";
@@ -20,6 +20,123 @@ const palette = {
   Charcoal:"#46484B", Lavender:"#9363B5"
 };
 const pkr = value => new Intl.NumberFormat("en-PK",{style:"currency",currency:"PKR",maximumFractionDigits:0}).format(Number(value)||0);
+const normalizeText = value => String(value || "").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+const productKind = product => {
+  const category = normalizeText(product?.categorySlug || product?.category);
+  const name = normalizeText(product?.name);
+  if (category.includes("scrub upper")) return "scrub-upper";
+  if (category.includes("lab coat") || category.includes("labcoat")) return "labcoat";
+  if (category.includes("trouser") || name.includes("trouser") || name.includes("pant")) return "trousers";
+  if (category.includes("accessor")) {
+    if (name.includes("name tag") || name.includes("nametag")) return "name-tag";
+    if (name.includes("inner")) return "inner";
+    if (name.includes("metallum")) return "metallum";
+    if (name.includes("sleeve")) return "sleeves";
+    return "accessory";
+  }
+  return "scrubs";
+};
+const productAttributes = product => {
+  const rules = {
+    "scrub-upper": { size:true, color:true, logo:true, design:false, label:"Optional logo engraving" },
+    labcoat: { size:true, name:true, logo:true, design:false, label:"Optional name and logo engraving" },
+    trousers: { size:true, color:true, design:false, label:"Trousers are ordered by size and colour" },
+    "name-tag": { name:true, forceCustomize:true, design:false, label:"Name engraving" },
+    inner: { size:true, color:true, colorNames:["Black","White"], sizeNames:["Small","Medium","Large"], design:false, label:"Innerwear options" },
+    metallum: { name:true, forceCustomize:true, design:false, label:"Name engraving" },
+    sleeves: { color:true, design:false, label:"Sleeve colour" },
+    accessory: { name:true, logo:true, design:false, label:"Accessory customization" },
+    scrubs: { gender:true, size:true, color:true, sleeve:true, name:true, logo:true, measurements:true, trouser:true, design:true, label:"Optional sleeves, engraving, measurements and trouser style" }
+  };
+  return rules[productKind(product)] || rules.scrubs;
+};
+const optionMatches = (actual, desired) => !desired || normalizeText(actual) === normalizeText(desired);
+const variantForSelection = (product, size, color, attributes = productAttributes(product)) => {
+  const variants = product.variants || [];
+  return variants.find(variant =>
+    (!attributes.size || optionMatches(variant.size,size)) &&
+    (!attributes.color || optionMatches(variant.colors?.name,color))
+  ) || variants.find(variant => variant.is_active !== false);
+};
+const describeCustomization = custom => [
+  custom?.gender,
+  custom?.color,
+  custom?.size,
+  custom?.sleeve && `${custom.sleeve} sleeve`,
+  custom?.trouser_style,
+  custom?.design && "Selected design"
+].filter(Boolean).join(" · ");
+const titleFromSlug = value => String(value || "").split("-").filter(Boolean).map(word=>word.charAt(0).toUpperCase()+word.slice(1)).join(" ");
+const routeFromLocation = () => {
+  if (typeof window === "undefined") return {page:"home"};
+  const parts = window.location.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+  const params = new URLSearchParams(window.location.search);
+  if (!parts.length) return {page:"home"};
+  if (parts[0] === "product" && parts[1]) return {page:"product",productSlug:parts[1]};
+  if (parts[0] === "shop") {
+    if (parts[1] === "colour" && parts[2]) return {page:"shop",query:`colour:${titleFromSlug(parts[2])}`};
+    if (parts[1]) return {page:"shop",query:titleFromSlug(parts[1])};
+    return {page:"shop",query:params.get("q") || ""};
+  }
+  const pageRoutes = { colours:"colours", account:"auth", admin:"admin", checkout:"checkout", contact:"contact", terms:"terms", shipping:"shipping", privacy:"privacy" };
+  return {page:pageRoutes[parts[0]] || "home"};
+};
+const routeUrl = ({page,query,product}) => {
+  if (page === "home") return "/";
+  if (page === "product" && product?.slug) return `/product/${product.slug}`;
+  if (page === "shop") {
+    if (query?.startsWith("colour:")) return `/shop/colour/${slugify(query.slice(7))}`;
+    return query ? `/shop/${slugify(query)}` : "/shop";
+  }
+  const pagePaths = { colours:"/colours", auth:"/account", admin:"/admin", checkout:"/checkout", contact:"/contact", terms:"/terms", shipping:"/shipping", privacy:"/privacy" };
+  return pagePaths[page] || "/";
+};
+const updateSeo = ({page,query,product}) => {
+  if (typeof document === "undefined") return;
+  const title = product?.name ? `${product.name} | MEDZ APPAREL`
+    : page === "shop" ? `${query ? query.replace(/^colour:/,"") : "Shop"} | MEDZ APPAREL`
+    : page === "colours" ? "Colour Palette | MEDZ APPAREL"
+    : page === "contact" ? "Contact MEDZ APPAREL"
+    : page === "terms" ? "Terms and Conditions | MEDZ APPAREL"
+    : page === "shipping" ? "Shipping Policy | MEDZ APPAREL"
+    : page === "privacy" ? "Privacy Policy | MEDZ APPAREL"
+    : page === "checkout" ? "Checkout | MEDZ APPAREL"
+    : page === "auth" ? "Account and Order Tracking | MEDZ APPAREL"
+    : page === "admin" ? "Admin | MEDZ APPAREL"
+    : "MEDZ APPAREL | The Doctor's Thread";
+  const description = product?.description || (page === "shop"
+    ? `Shop ${query ? query.replace(/^colour:/,"") : "medical apparel"} from MEDZ APPAREL in Pakistan.`
+    : "Premium medical scrubs, lab coats, trousers and accessories by MEDZ APPAREL Pakistan.");
+  document.title = title;
+  let meta = document.querySelector('meta[name="description"]');
+  if (!meta) {
+    meta = document.createElement("meta");
+    meta.setAttribute("name","description");
+    document.head.appendChild(meta);
+  }
+  meta.setAttribute("content",description);
+  const ensureMeta = (selector,attrs) => {
+    let node = document.querySelector(selector);
+    if (!node) {
+      node = document.createElement("meta");
+      Object.entries(attrs.create).forEach(([key,value])=>node.setAttribute(key,value));
+      document.head.appendChild(node);
+    }
+    Object.entries(attrs.update).forEach(([key,value])=>node.setAttribute(key,value));
+  };
+  const canonicalUrl = `${window.location.origin}${routeUrl({page,query,product})}`;
+  let canonical = document.querySelector('link[rel="canonical"]');
+  if (!canonical) {
+    canonical = document.createElement("link");
+    canonical.setAttribute("rel","canonical");
+    document.head.appendChild(canonical);
+  }
+  canonical.setAttribute("href",canonicalUrl);
+  ensureMeta('meta[property="og:title"]',{create:{property:"og:title"},update:{content:title}});
+  ensureMeta('meta[property="og:description"]',{create:{property:"og:description"},update:{content:description}});
+  ensureMeta('meta[property="og:url"]',{create:{property:"og:url"},update:{content:canonicalUrl}});
+  if (product?.image) ensureMeta('meta[property="og:image"]',{create:{property:"og:image"},update:{content:product.image}});
+};
 
 function prepareOrderChime() {
   try {
@@ -114,16 +231,18 @@ const policyContent = {
 };
 
 function App() {
+  const initialRoute = useMemo(routeFromLocation,[]);
   const [dark, setDark] = useState(() => localStorage.getItem("mz-theme") === "dark");
-  const [page, setPage] = useState("home");
+  const [page, setPage] = useState(initialRoute.page);
   const [selected, setSelected] = useState(null);
+  const [productSlug, setProductSlug] = useState(initialRoute.productSlug || "");
   const [products, setProducts] = useState([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState("");
   const [cart, setCart] = useState([]);
   const [cartOpen, setCartOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialRoute.query || "");
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
@@ -134,8 +253,36 @@ function App() {
     localStorage.setItem("mz-theme", dark ? "dark" : "light");
   }, [dark]);
   useEffect(() => {
+    const originalUrl = window.location.pathname + window.location.search + window.location.hash;
+    if (originalUrl !== "/" && !window.history.state?.medzBootstrapped) {
+      window.history.replaceState({medz:true,medzBootstrapped:true,page:"home"},"","/");
+      window.history.pushState({medz:true,page:initialRoute.page},"",originalUrl);
+    } else if (!window.history.state?.medz) {
+      window.history.replaceState({medz:true,page:initialRoute.page},"",originalUrl);
+    }
+    const onPopState = () => {
+      const route = routeFromLocation();
+      setPage(route.page);
+      setQuery(route.query || "");
+      setProductSlug(route.productSlug || "");
+      if (route.page !== "product") setSelected(null);
+      setMenuOpen(false);
+      setCartOpen(false);
+    };
+    window.addEventListener("popstate",onPopState);
+    return () => window.removeEventListener("popstate",onPopState);
+  }, []);
+  useEffect(() => {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [page]);
+  useEffect(() => {
+    if (page !== "product" || !productSlug) return;
+    const match = products.find(product=>product.slug === productSlug || product.id === productSlug);
+    if (match) setSelected(match);
+  }, [page,productSlug,products]);
+  useEffect(() => {
+    updateSeo({page,query,product:page === "product" ? selected : null});
+  }, [page,query,selected]);
   const loadCatalog = async () => {
     setCatalogLoading(true); setCatalogError("");
     try {
@@ -166,35 +313,52 @@ function App() {
     return () => { active = false; listener.subscription.unsubscribe(); };
   }, []);
 
-  const goShop = (category = "All") => { setQuery(category === "All" ? "" : category); setPage("shop"); setMenuOpen(false); };
-  const openProduct = p => { setSelected(p); setPage("product"); };
+  const navigate = (nextPage, options = {}) => {
+    const nextQuery = options.query ?? "";
+    const nextProduct = options.product || null;
+    setPage(nextPage);
+    setQuery(nextPage === "shop" ? nextQuery : "");
+    setProductSlug(nextPage === "product" ? nextProduct?.slug || options.productSlug || "" : "");
+    setSelected(nextPage === "product" ? nextProduct || selected : null);
+    setMenuOpen(false);
+    const url = routeUrl({page:nextPage,query:nextQuery,product:nextProduct});
+    if (window.location.pathname + window.location.search !== url) {
+      window.history[options.replace ? "replaceState" : "pushState"]({medz:true,page:nextPage},"",url);
+    }
+  };
+  const goShop = (category = "All") => navigate("shop",{query:category === "All" ? "" : category});
+  const openProduct = p => navigate("product",{product:p});
   const add = (product, size = product.sizes[0], color = product.colors[0], customization = {}) => {
-    const variant = product.variants?.find(v => v.size === size && v.colors?.name === color);
+    const attributes = productAttributes(product);
+    const variant = variantForSelection(product,size,color,attributes);
     if (!variant) {
-      window.alert("That colour and size combination is not available yet. Please choose another option.");
+      window.alert("That product option is not available yet. Please choose another option.");
       return;
     }
     const basePrice = variant.price_override == null ? product.price : Number(variant.price_override);
     const measurementFee = Object.values(customization.measurements || {}).filter(value=>String(value).trim()).length * 100;
     const price = basePrice + measurementFee;
-    setCart(c => [...c, { ...product, price, basePrice, customization, cartId: `${Date.now()}-${Math.random()}`, size:variant.size, color:variant.colors?.name||color, variantId:variant.id }]);
+    const selectedSize = attributes.size ? variant.size : "";
+    const selectedColor = attributes.color ? variant.colors?.name || color : "";
+    setCart(c => [...c, { ...product, price, basePrice, customization:{...customization,size:selectedSize,color:selectedColor}, cartId: `${Date.now()}-${Math.random()}`, size:selectedSize, color:selectedColor, variantId:variant.id }]);
     setCartOpen(true);
   };
 
   return <div className="app">
     <div className="announcement">COMPLIMENTARY SHIPPING ON ORDERS PKR 10,000+ <span>SHOP NOW <ArrowRight size={13}/></span></div>
-    <Header {...{dark,setDark,page,setPage,goShop,cart,setCartOpen,menuOpen,setMenuOpen,query,setQuery,user,categories}} />
+    <Header {...{dark,setDark,page,setPage:navigate,goShop,cart,setCartOpen,menuOpen,setMenuOpen,query,setQuery,user,categories}} />
     {page === "home" && <Home {...{goShop,openProduct,add,products,catalogLoading,categories,reviews}} />}
     {page === "shop" && <Shop initialQuery={query} openProduct={openProduct} add={add} products={products} categories={categories} loading={catalogLoading} error={catalogError}/>}
     {page === "colours" && <ColourPalette products={products} onSelect={colour=>goShop(`colour:${colour}`)} />}
-    {page === "product" && selected && <Product product={selected} add={add} openProduct={openProduct} products={products}/>}
-    {page === "auth" && <AuthPage user={user} profile={profile} onDone={() => setPage("home")} onAdmin={() => setPage("admin")} onContact={() => setPage("contact")} onCheckout={() => setPage("checkout")} onSignOut={async () => { await supabase?.auth.signOut(); setPage("home"); }}/>}
-    {page === "admin" && <Admin user={user} profile={profile} authReady={authReady} catalogLoading={catalogLoading} onLogin={() => setPage("auth")} products={products} onCreated={loadCatalog} />}
-    {page === "checkout" && <Checkout user={user} profile={profile} cart={cart} setCart={setCart} onLogin={()=>setPage("auth")} onShop={()=>goShop("All")} />}
+    {page === "product" && selected && <Product product={selected} add={add} openProduct={openProduct} products={products} onBack={()=>navigate("home")}/>}
+    {page === "product" && !selected && (catalogLoading ? <ProductPageSkeleton/> : <main className="auth-page"><section className="account-card"><Package/><p className="eyebrow">PRODUCT</p><h1>Product not found</h1><button className="primary" onClick={()=>navigate("home")}>Back to home</button></section></main>)}
+    {page === "auth" && <AuthPage user={user} profile={profile} onDone={() => navigate("home")} onAdmin={() => navigate("admin")} onContact={() => navigate("contact")} onCheckout={() => navigate("checkout")} onSignOut={async () => { await supabase?.auth.signOut(); navigate("home"); }}/>}
+    {page === "admin" && <Admin user={user} profile={profile} authReady={authReady} catalogLoading={catalogLoading} onLogin={() => navigate("auth")} products={products} onCreated={loadCatalog} />}
+    {page === "checkout" && <Checkout user={user} profile={profile} cart={cart} setCart={setCart} onLogin={()=>navigate("auth")} onShop={()=>goShop("All")} />}
     {["terms","shipping","privacy"].includes(page) && <PolicyPage policy={policyContent[page]} />}
     {page === "contact" && <ContactPage />}
-    <Footer goShop={goShop} onNavigate={setPage} categories={categories}/>
-    <Cart cart={cart} setCart={setCart} open={cartOpen} close={() => setCartOpen(false)} onCheckout={()=>{setCartOpen(false);setPage("checkout")}}/>
+    <Footer goShop={goShop} onNavigate={navigate} categories={categories}/>
+    <Cart cart={cart} setCart={setCart} open={cartOpen} close={() => setCartOpen(false)} onCheckout={()=>{setCartOpen(false);navigate("checkout")}}/>
   </div>;
 }
 
@@ -297,10 +461,12 @@ function Home({goShop,openProduct,add,products=[],catalogLoading,categories=[],r
   const favorites = featured.length ? featured : products.slice(0,8);
   return <main className="home-page">
     <section className="hero">
-      <video autoPlay muted loop playsInline poster="/media/medz-hero-poster.jpg" aria-label="Medz Apparel medical uniforms and outerwear collection">
-        <source src="/media/medz-hero.webm" type="video/webm"/>
-        <img src="/media/medz-hero.gif" alt="Medz Apparel medical uniforms and outerwear collection"/>
-      </video>
+      <HeroVideo />
+    </section>
+    <section className="hero-seo">
+      <p className="eyebrow">MEDICAL APPAREL / PAKISTAN</p>
+      <h1>Premium Medical Scrubs and Healthcare Apparel in Pakistan</h1>
+      <h2>Comfortable uniforms designed for doctors, nurses, and healthcare professionals.</h2>
     </section>
     <section className="section home-categories">
       <div className="section-head"><div><p className="eyebrow">SHOP BY CATEGORY</p><h2>Find your uniform.</h2></div><button className="text-link" onClick={() => goShop("All")}>View all <ArrowRight size={16}/></button></div>
@@ -310,11 +476,6 @@ function Home({goShop,openProduct,add,products=[],catalogLoading,categories=[],r
         </button>)}</div>
     </section>
     <ProductRow title="The shift favorites." label="FEATURED / FAVORITES" list={favorites} loading={catalogLoading} carousel {...{openProduct,add,goShop}} />
-    <section className="hero-seo">
-      <p className="eyebrow">MEDICAL APPAREL / PAKISTAN</p>
-      <h1>Premium Medical Scrubs and Healthcare Apparel in Pakistan</h1>
-      <h2>Comfortable uniforms designed for doctors, nurses, and healthcare professionals.</h2>
-    </section>
     <section className="values">
       <p>Designed with purpose.</p>
       <div><span>01</span><h3>All-shift comfort</h3><p>Soft, breathable fabrics that move when you do.</p></div>
@@ -323,6 +484,7 @@ function Home({goShop,openProduct,add,products=[],catalogLoading,categories=[],r
     </section>
     <ProductRow title="Fresh off the line." label="NEW ARRIVALS" list={products.slice(0,8)} loading={catalogLoading} carousel {...{openProduct,add,goShop}} />
     <Reviews reviews={reviews}/>
+    <section className="desktop-story-video" aria-label="Medz Apparel collection video"><HeroVideo /></section>
     <section className="manifesto">
       <span className="eyebrow">WHY MEDZ APPAREL</span>
       <h2>Because what you wear<br/>should work as hard as <em>you do.</em></h2>
@@ -333,8 +495,32 @@ function Home({goShop,openProduct,add,products=[],catalogLoading,categories=[],r
   </main>;
 }
 
+function HeroVideo() {
+  return <video autoPlay muted loop playsInline aria-label="Medz Apparel medical uniforms and outerwear collection">
+    <source src="/media/medz-hero.mp4" type="video/mp4"/>
+  </video>;
+}
+
 function ProductSkeletons({count=4,carousel=false}) {
   return <div className={`product-grid ${carousel?"product-carousel":""}`}>{Array.from({length:count},(_,index)=><article className="product-card product-skeleton" key={index}><div className="skeleton"/><span className="skeleton"/><small className="skeleton"/></article>)}</div>;
+}
+
+function ProductPageSkeleton() {
+  return <main className="product-page product-page-skeleton">
+    <span className="skeleton skeleton-line short"/>
+    <div className="product-layout">
+      <div><div className="skeleton product-detail-skeleton-image"/><div className="design-gallery">{Array.from({length:4},(_,index)=><span className="skeleton" key={index}/>)}</div></div>
+      <div className="product-info"><span className="skeleton skeleton-line medium"/><span className="skeleton skeleton-title"/><span className="skeleton skeleton-line short"/><span className="skeleton skeleton-copy"/><span className="skeleton skeleton-copy narrow"/><div className="selector-skeleton">{Array.from({length:3},(_,index)=><span className="skeleton" key={index}/>)}</div><span className="skeleton skeleton-button"/></div>
+    </div>
+  </main>;
+}
+
+function AdminShellSkeleton() {
+  return <main className="admin admin-skeleton">
+    <div className="admin-title"><div><span className="skeleton skeleton-line short"/><span className="skeleton skeleton-title"/><span className="skeleton skeleton-line medium"/></div><span className="skeleton skeleton-button small"/></div>
+    <div className="metrics">{Array.from({length:4},(_,index)=><div key={index}><span className="skeleton skeleton-icon"/><span className="skeleton skeleton-line medium"/><span className="skeleton skeleton-title small"/><span className="skeleton skeleton-line short"/></div>)}</div>
+    <section className="admin-products"><div className="panel-head"><span className="skeleton skeleton-line medium"/><span className="skeleton skeleton-line short"/></div><ProductSkeletons count={4}/></section>
+  </main>;
 }
 
 function ProductRow({title,label,list,openProduct,add,goShop,carousel=false,loading=false}) {
@@ -370,7 +556,7 @@ function Reviews({reviews}) {
 function ProductCard({p,openProduct,add}) {
   return <article className="product-card">
     <button className="product-image" onClick={() => openProduct(p)}>{p.image ? <img src={p.image} alt={p.name}/> : <span className="image-placeholder"><Package/></span>}{p.badge && <span className="badge">{p.badge}</span>}<span className="quick" onClick={e => {e.stopPropagation(); add(p)}}><Plus size={18}/> Quick add</span></button>
-    <div className="product-meta"><button onClick={() => openProduct(p)}><strong>{p.name}</strong><span>{p.gender === "Unisex" ? "Men & Women" : p.gender} · {p.fabric}</span></button><b>{pkr(p.price)}</b></div>
+    <div className="product-meta"><button onClick={() => openProduct(p)}><strong>{p.name}</strong><span>{p.gender === "Unisex" ? "Men & Women" : p.gender} · {p.fabric}</span></button><b className={p.isOnSale?"sale-price":""}>{p.isOnSale&&<del>{pkr(p.regularPrice)}</del>}{pkr(p.price)}</b></div>
     <div className="swatches">{p.colors.map(c => <i key={c} style={{background:p.variants.find(variant=>variant.colors?.name===c)?.colors?.hex||palette[c]||"#777"}} title={c}/>)}</div>
   </article>;
 }
@@ -392,7 +578,7 @@ function Shop({initialQuery,openProduct,add,products=[],categories=[],loading,er
     setColor(initialQuery?.startsWith("colour:") ? initialQuery.slice(7) : "All");
   }, [initialQuery,categories.length]);
   let shown = useMemo(() => products.filter(p =>
-    (category === "All" || category === "Sale" ? category !== "Sale" || p.isFeatured : p.category === category) &&
+    (category === "All" || category === "Sale" ? category !== "Sale" || p.isOnSale : p.category === category) &&
     (color === "All" || p.colors.includes(color)) &&
     (fabric === "All" || p.fabric === fabric) &&
     p.name.toLowerCase().includes(search.toLowerCase())
@@ -410,7 +596,7 @@ function Shop({initialQuery,openProduct,add,products=[],categories=[],loading,er
         <Filter title="Colour" options={colorOptions} value={color} set={setColor} swatch/>
         <Filter title="Fabric" options={fabricOptions} value={fabric} set={setFabric}/>
       </aside>
-      <div className="catalog-results"><div className="result-count">{loading?"Loading products…":`${shown.length} pieces`}</div>{loading ? <ProductSkeletons count={8}/> : error ? <div className="empty"><X/><h3>Could not load products</h3><p>{error}</p></div> : <><div className="product-grid">{shown.map(p => <ProductCard key={p.id} p={p} {...{openProduct,add}}/>)}</div>{!shown.length && <div className="empty"><Search/><h3>No pieces found</h3><p>{products.length ? "Try adjusting your filters." : "Products added in admin will appear here."}</p></div>}</>}</div>
+      <div className="catalog-results"><div className="result-count">{loading?<span className="skeleton skeleton-line result-skeleton"/>:`${shown.length} pieces`}</div>{loading ? <ProductSkeletons count={8}/> : error ? <div className="empty"><X/><h3>Could not load products</h3><p>{error}</p></div> : <><div className="product-grid">{shown.map(p => <ProductCard key={p.id} p={p} {...{openProduct,add}}/>)}</div>{!shown.length && <div className="empty"><Search/><h3>No pieces found</h3><p>{products.length ? "Try adjusting your filters." : "Products added in admin will appear here."}</p></div>}</>}</div>
     </div>
   </main>;
 }
@@ -419,10 +605,23 @@ function Filter({title,options,value,set,swatch}) {
   return <div className="filter"><h3>{title}<ChevronDown size={16}/></h3>{options.map(o=><label key={o}><input type="radio" checked={value===o} onChange={()=>set(o)}/>{swatch && o!=="All" && <i style={{background:palette[o]}}/>}{o}</label>)}</div>;
 }
 
-function Product({product,add,openProduct,products}) {
+function Product({product,add,openProduct,products,onBack}) {
+  const attributes = productAttributes(product);
   const genderOptions = product.gender === "Unisex" ? ["Men","Women"] : [product.gender];
-  const [color,setColor] = useState(product.colors[0]);
-  const [size,setSize] = useState(product.sizes[0]);
+  const allowedColors = useMemo(() => {
+    const options = attributes.colorNames?.length
+      ? product.colors.filter(color=>attributes.colorNames.some(name=>normalizeText(name)===normalizeText(color)))
+      : product.colors;
+    return options.length ? options : product.colors;
+  },[product,attributes.colorNames]);
+  const allowedSizes = useMemo(() => {
+    const options = attributes.sizeNames?.length
+      ? product.sizes.filter(size=>attributes.sizeNames.some(name=>normalizeText(name)===normalizeText(size)))
+      : product.sizes;
+    return options.length ? options : product.sizes;
+  },[product,attributes.sizeNames]);
+  const [color,setColor] = useState(allowedColors[0] || product.colors[0] || "");
+  const [size,setSize] = useState(allowedSizes[0] || product.sizes[0] || "");
   const [gender,setGender] = useState(genderOptions[0]);
   const [qty,setQty] = useState(1);
   const [customize,setCustomize] = useState(false);
@@ -437,18 +636,33 @@ function Product({product,add,openProduct,products}) {
   const [trouserStyle,setTrouserStyle] = useState("Straight");
   const [design,setDesign] = useState(product.images?.[0]?.url || product.image);
   const [sizeChart,setSizeChart] = useState(false);
+  const [shareStatus,setShareStatus] = useState("");
   const galleryImages = product.images?.length ? product.images : [{id:"primary",url:product.image}];
-  const colourBased = product.productMode === "colour";
+  const colourBased = product.productMode === "colour" && attributes.design !== false;
   const measurementFee = customize&&customSizing ? Object.values(measurements).filter(value=>String(value).trim()).length*100 : 0;
-  useEffect(()=>{setColor(product.colors[0]);setSize(product.sizes[0]);setGender(product.gender === "Unisex" ? "Men" : product.gender);setQty(1);setDesign(product.images?.[0]?.url||product.image);setCustomize(false)},[product]);
-  const customization = customize ? {
-    gender,sleeve,
-    name_engraving:nameEngraving ? engravingName.trim() : null,
-    logo_engraving:logoEngraving ? logo : null,
-    measurements:customSizing ? measurements : {},
-    trouser_style:trouserStyle,
+  const hasCustomization = attributes.sleeve || attributes.name || attributes.logo || attributes.measurements || attributes.trouser;
+  const effectiveCustomize = attributes.forceCustomize || customize;
+  const hasRequiredName = attributes.forceCustomize && attributes.name;
+  useEffect(()=>{
+    const nextAttributes = productAttributes(product);
+    const nextColors = nextAttributes.colorNames?.length ? product.colors.filter(color=>nextAttributes.colorNames.some(name=>normalizeText(name)===normalizeText(color))) : product.colors;
+    const nextSizes = nextAttributes.sizeNames?.length ? product.sizes.filter(size=>nextAttributes.sizeNames.some(name=>normalizeText(name)===normalizeText(size))) : product.sizes;
+    setColor((nextColors.length ? nextColors : product.colors)[0] || "");
+    setSize((nextSizes.length ? nextSizes : product.sizes)[0] || "");
+    setGender(product.gender === "Unisex" ? "Men" : product.gender);
+    setQty(1); setDesign(product.images?.[0]?.url||product.image); setCustomize(false);
+    setNameEngraving(Boolean(nextAttributes.forceCustomize && nextAttributes.name));
+    setLogoEngraving(false); setEngravingName(""); setLogo(null); setCustomSizing(false);
+  },[product]);
+  const customization = effectiveCustomize ? {
+    gender:attributes.gender ? gender : null,
+    sleeve:attributes.sleeve ? sleeve : null,
+    name_engraving:attributes.name && (nameEngraving || attributes.forceCustomize) ? engravingName.trim() : null,
+    logo_engraving:attributes.logo && logoEngraving ? logo : null,
+    measurements:attributes.measurements && customSizing ? measurements : {},
+    trouser_style:attributes.trouser ? trouserStyle : null,
     design:colourBased ? design : null
-  } : {gender,design:colourBased ? design : null};
+  } : {gender:attributes.gender ? gender : null,design:colourBased ? design : null};
   const uploadLogo = async event => {
     const file=event.target.files?.[0]; if(!file)return;
     setLogoUploading(true);
@@ -456,24 +670,44 @@ function Product({product,add,openProduct,products}) {
     catch(error){window.alert(error.message)}
     finally{setLogoUploading(false);event.target.value=""}
   };
+  const shareProduct = async () => {
+    const url = `${window.location.origin}${routeUrl({page:"product",product})}`;
+    const shareData = {title:product.name,text:`${product.name} from MEDZ APPAREL`,url};
+    setShareStatus("");
+    try {
+      if (navigator.share) await navigator.share(shareData);
+      else {
+        await navigator.clipboard.writeText(url);
+        setShareStatus("Link copied");
+        setTimeout(()=>setShareStatus(""),1800);
+      }
+    } catch (error) {
+      if (error.name !== "AbortError") {
+        await navigator.clipboard?.writeText(url);
+        setShareStatus("Link copied");
+        setTimeout(()=>setShareStatus(""),1800);
+      }
+    }
+  };
   return <main className="product-page">
-    <button className="back" onClick={()=>history.back()}><ArrowLeft size={16}/> Back to collection</button>
+    <button className="back" onClick={onBack}><ArrowLeft size={16}/> Back to home</button>
     <div className="product-layout">
       <div className="product-gallery-wrap"><div className="gallery"><img src={design||product.image} alt={product.name}/><div className="gallery-count">{String(Math.max(1,galleryImages.findIndex(item=>item.url===design)+1)).padStart(2,"0")} / {String(galleryImages.length).padStart(2,"0")}</div></div>{galleryImages.length>1&&<div className="design-gallery" aria-label={colourBased?"Choose a design":"Product gallery"}>{galleryImages.slice(0,8).map((image,index)=><button className={design===image.url?"selected":""} key={image.id} onClick={()=>setDesign(image.url)}><img src={image.url} alt={`${product.name} view ${index+1}`}/><span>{index+1}</span></button>)}</div>}</div>
       <div className="product-info">
-        <p className="eyebrow">{product.category} · {product.gender === "Unisex" ? "Men & Women" : product.gender}</p><h1>{product.name}</h1><p className="price">{pkr(product.price)}</p>
+        <p className="eyebrow">{product.category} · {product.gender === "Unisex" ? "Men & Women" : product.gender}</p><h1>{product.name}</h1><p className={product.isOnSale?"price sale-price":"price"}>{product.isOnSale&&<del>{pkr(product.regularPrice)}</del>}{pkr(product.price)}</p>
         <p className="description">Polished enough for rounds, comfortable enough for the longest shift. Crafted in our signature {product.fabric.toLowerCase()} fabric with a clean, easy fit and thoughtfully placed utility.</p>
-        <div className="selector"><div><b>Gender</b><span>{gender}</span></div><div className="size-options">{genderOptions.map(option=><button key={option} className={gender===option?"selected":""} onClick={()=>setGender(option)}>{option}</button>)}</div></div>
-        {!colourBased&&<div className="selector"><div><b>Colour</b><span>{color}</span></div><div className="color-options">{product.colors.map(c=><button key={c} className={color===c?"selected":""} onClick={()=>setColor(c)} style={{"--swatch":product.variants.find(variant=>variant.colors?.name===c)?.colors?.hex||palette[c]||"#888"}} aria-label={c}/>)}</div></div>}
-        <div className="selector"><div><b>Size</b><button className="underlined" onClick={()=>setSizeChart(true)}>Size chart</button></div><div className="size-options">{product.sizes.map(s=><button key={s} className={size===s?"selected":""} onClick={()=>setSize(s)}>{s}</button>)}</div></div>
-        <section className="customization-panel"><div className="customization-head"><div><b>Customize this item</b><span>Optional sleeves, engraving, measurements and trouser style</span></div><div className="yes-no"><button className={!customize?"selected":""} onClick={()=>setCustomize(false)}>No</button><button className={customize?"selected":""} onClick={()=>setCustomize(true)}>Yes</button></div></div>{customize&&<div className="customization-fields">
-          <OptionButtons label="Sleeve" options={["Half","Quarter","Full"]} value={sleeve} setValue={setSleeve}/>
-          <ToggleField label="Name engraving" enabled={nameEngraving} setEnabled={setNameEngraving}>{nameEngraving&&<input maxLength="12" value={engravingName} onChange={event=>setEngravingName(event.target.value)} placeholder="Name, up to 12 letters"/>}</ToggleField>
-          <ToggleField label="Logo engraving" enabled={logoEngraving} setEnabled={setLogoEngraving}>{logoEngraving&&<label className="customer-logo-upload"><Upload size={16}/>{logoUploading?"Uploading…":logo?logo.name:"Upload your logo"}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={uploadLogo} disabled={logoUploading}/><small>PNG, JPEG or WebP · maximum 2 MB</small></label>}</ToggleField>
-          <ToggleField label="Size customization" enabled={customSizing} setEnabled={setCustomSizing}>{customSizing&&<div className="measurements-grid">{Object.entries(measurements).map(([key,value])=><label key={key}>{key.replaceAll("_"," ")}<input type="number" min="0" step=".1" value={value} onChange={event=>setMeasurements(current=>({...current,[key]:event.target.value}))} placeholder="inches"/></label>)}<p><Ruler size={14}/> Rs 100 per completed measurement · {pkr(measurementFee)}</p></div>}</ToggleField>
-          <OptionButtons label="Trouser style" options={["Straight","Bottom/Cargo"]} value={trouserStyle} setValue={setTrouserStyle}/>
-        </div>}</section>
-        <div className="buy-row"><div className="quantity"><button onClick={()=>setQty(Math.max(1,qty-1))}><Minus size={15}/></button>{qty}<button onClick={()=>setQty(qty+1)}><Plus size={15}/></button></div><button className="primary" disabled={customize&&logoEngraving&&!logo} onClick={()=>Array.from({length:qty}).forEach(()=>add(product,size,color,customization))}>Add to bag — {pkr((product.price+measurementFee)*qty)}</button><button className="wish"><Heart/></button></div>
+        {attributes.gender&&<div className="selector"><div><b>Gender</b><span>{gender}</span></div><div className="size-options">{genderOptions.map(option=><button key={option} className={gender===option?"selected":""} onClick={()=>setGender(option)}>{option}</button>)}</div></div>}
+        {attributes.color&&!colourBased&&<div className="selector"><div><b>Colour</b><span>{color}</span></div><div className="color-options">{allowedColors.map(c=><button key={c} className={color===c?"selected":""} onClick={()=>setColor(c)} style={{"--swatch":product.variants.find(variant=>variant.colors?.name===c)?.colors?.hex||palette[c]||"#888"}} aria-label={c}/>)}</div></div>}
+        {attributes.size&&<div className="selector"><div><b>Size</b><button className="underlined" onClick={()=>setSizeChart(true)}>Size chart</button></div><div className="size-options">{allowedSizes.map(s=><button key={s} className={size===s?"selected":""} onClick={()=>setSize(s)}>{s}</button>)}</div></div>}
+        {hasCustomization&&<section className="customization-panel"><div className="customization-head"><div><b>{attributes.forceCustomize?"Customize this item":"Customize this item"}</b><span>{attributes.label}</span></div>{!attributes.forceCustomize&&<div className="yes-no"><button className={!customize?"selected":""} onClick={()=>setCustomize(false)}>No</button><button className={customize?"selected":""} onClick={()=>setCustomize(true)}>Yes</button></div>}</div>{effectiveCustomize&&<div className="customization-fields">
+          {attributes.sleeve&&<OptionButtons label="Sleeve" options={["Half","Quarter","Full"]} value={sleeve} setValue={setSleeve}/>}
+          {attributes.name&&<ToggleField label="Name engraving" enabled={attributes.forceCustomize || nameEngraving} setEnabled={attributes.forceCustomize ? ()=>{} : setNameEngraving} locked={attributes.forceCustomize}>{(attributes.forceCustomize||nameEngraving)&&<input maxLength="12" value={engravingName} onChange={event=>setEngravingName(event.target.value)} placeholder="Name, up to 12 letters" required={hasRequiredName}/>}</ToggleField>}
+          {attributes.logo&&<ToggleField label="Logo engraving" enabled={logoEngraving} setEnabled={setLogoEngraving}>{logoEngraving&&<label className="customer-logo-upload"><Upload size={16}/>{logoUploading?"Uploading…":logo?logo.name:"Upload your logo"}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={uploadLogo} disabled={logoUploading}/><small>PNG, JPEG or WebP · maximum 2 MB</small></label>}</ToggleField>}
+          {attributes.measurements&&<ToggleField label="Size customization" enabled={customSizing} setEnabled={setCustomSizing}>{customSizing&&<div className="measurements-grid">{Object.entries(measurements).map(([key,value])=><label key={key}>{key.replaceAll("_"," ")}<input type="number" min="0" step=".1" value={value} onChange={event=>setMeasurements(current=>({...current,[key]:event.target.value}))} placeholder="inches"/></label>)}<p><Ruler size={14}/> Rs 100 per completed measurement · {pkr(measurementFee)}</p></div>}</ToggleField>}
+          {attributes.trouser&&<OptionButtons label="Trouser style" options={["Straight","Bottom/Cargo"]} value={trouserStyle} setValue={setTrouserStyle}/>}
+        </div>}</section>}
+        <div className="buy-row"><div className="quantity"><button onClick={()=>setQty(Math.max(1,qty-1))}><Minus size={15}/></button>{qty}<button onClick={()=>setQty(qty+1)}><Plus size={15}/></button></div><button className="primary" disabled={(effectiveCustomize&&logoEngraving&&!logo)||(hasRequiredName&&!engravingName.trim())} onClick={()=>Array.from({length:qty}).forEach(()=>add(product,size,color,customization))}>Add to bag — {pkr((product.price+measurementFee)*qty)}</button><button className="wish" aria-label="Save product"><Heart/></button><button className="wish share-product" aria-label="Share product" onClick={shareProduct}><Share2/></button></div>
+        {shareStatus&&<p className="share-status">{shareStatus}</p>}
         <p className="stock"><i/> In stock — ready to ship</p>
         {["Details & fit","Fabric & care","Shipping & returns"].map(x=><button className="accordion" key={x}>{x}<Plus size={18}/></button>)}
       </div>
@@ -487,15 +721,15 @@ function OptionButtons({label,options,value,setValue}) {
   return <div className="custom-option"><b>{label}</b><div>{options.map(option=><button key={option} className={value===option?"selected":""} onClick={()=>setValue(option)}>{option}</button>)}</div></div>;
 }
 
-function ToggleField({label,enabled,setEnabled,children}) {
-  return <div className="custom-option toggle-option"><div><b>{label}</b><div className="yes-no"><button className={!enabled?"selected":""} onClick={()=>setEnabled(false)}>No</button><button className={enabled?"selected":""} onClick={()=>setEnabled(true)}>Yes</button></div></div>{children}</div>;
+function ToggleField({label,enabled,setEnabled,children,locked=false}) {
+  return <div className="custom-option toggle-option"><div><b>{label}</b>{!locked&&<div className="yes-no"><button className={!enabled?"selected":""} onClick={()=>setEnabled(false)}>No</button><button className={enabled?"selected":""} onClick={()=>setEnabled(true)}>Yes</button></div>}</div>{children}</div>;
 }
 
 function Cart({cart,setCart,open,close,onCheckout}) {
   const total=cart.reduce((s,p)=>s+p.price,0);
   return <><div className={`overlay ${open?"show":""}`} onClick={close}/><aside className={`cart-drawer ${open?"open":""}`}><div className="cart-head"><h2>Your bag <span>{cart.length}</span></h2><button onClick={close}><X/></button></div>
     {!cart.length ? <div className="empty"><ShoppingBag/><h3>Your bag is taking a break.</h3><p>Fill it with something made for the shift.</p><button className="primary" onClick={close}>Continue shopping</button></div> :
-    <><div className="cart-items">{cart.map(item=><div className="cart-item" key={item.cartId}><img src={item.customization?.design||item.image}/><div><strong>{item.name}</strong><span>{item.color} / {item.size}{item.customization?.sleeve&&` · ${item.customization.sleeve} sleeve`}</span>{item.customization?.name_engraving&&<small>Engraving: {item.customization.name_engraving}</small>}<b>{pkr(item.price)}</b></div><button onClick={()=>setCart(c=>c.filter(x=>x.cartId!==item.cartId))}><Trash2 size={16}/></button></div>)}</div><div className="cart-bottom"><p><span>Subtotal</span><b>{pkr(total)}</b></p><small>Shipping calculated at checkout.</small><button className="primary" onClick={onCheckout}>Checkout <ArrowRight size={17}/></button></div></>}</aside></>;
+    <><div className="cart-items">{cart.map(item=>{const details=describeCustomization(item.customization)||"Standard";return <div className="cart-item" key={item.cartId}><img src={item.customization?.design||item.image}/><div><strong>{item.name}</strong><span>{details}</span>{item.customization?.name_engraving&&<small>Engraving: {item.customization.name_engraving}</small>}{item.customization?.logo_engraving?.url&&<small>Logo uploaded</small>}<b>{pkr(item.price)}</b></div><button onClick={()=>setCart(c=>c.filter(x=>x.cartId!==item.cartId))}><Trash2 size={16}/></button></div>})}</div><div className="cart-bottom"><p><span>Subtotal</span><b>{pkr(total)}</b></p><small>Shipping calculated at checkout.</small><button className="primary" onClick={onCheckout}>Checkout <ArrowRight size={17}/></button></div></>}</aside></>;
 }
 
 const pakistanCities = ["Abbottabad","Bahawalpur","Bannu","Chiniot","Dera Ghazi Khan","Faisalabad","Gilgit","Gujranwala","Gujrat","Hyderabad","Islamabad","Jacobabad","Jhelum","Karachi","Kasur","Khanewal","Khuzdar","Kohat","Lahore","Larkana","Mardan","Mirpur","Multan","Muzaffarabad","Nawabshah","Nowshera","Okara","Peshawar","Quetta","Rahim Yar Khan","Rawalpindi","Sahiwal","Sargodha","Sheikhupura","Sialkot","Sukkur","Swabi","Thatta","Turbat","Wah Cantt"];
@@ -568,7 +802,7 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
         </form>:<div className="review">
           <div className="review-block"><div className="review-head"><h2>Delivery address</h2><button onClick={()=>setStep("details")}>Edit</button></div><b>{address.recipient_name}</b><p>{address.complete_address}<br/>{address.city}, Pakistan<br/>{address.mobile}{address.secondary_mobile&&` · ${address.secondary_mobile}`}</p>{saveDetails&&<small className="save-address-note"><Check size={13}/> These details will be saved to your account.</small>}</div>
           <div className="review-block"><h2>Payment</h2><p><Banknote size={17}/> Cash on delivery</p></div>
-          <div className="review-block"><h2>Items</h2>{grouped.map(item=><div className="review-item" key={item.groupKey}><img src={item.customization?.design||item.image}/><div><b>{item.name}</b><span>{item.color} / {item.size} · Qty {item.quantity}{item.customization?.sleeve&&` · ${item.customization.sleeve} sleeve`}</span>{item.customization?.name_engraving&&<small>Engraving: {item.customization.name_engraving}</small>}</div><strong>{pkr(item.price*item.quantity)}</strong></div>)}</div>
+          <div className="review-block"><h2>Items</h2>{grouped.map(item=>{const details=describeCustomization(item.customization)||"Standard";return <div className="review-item" key={item.groupKey}><img src={item.customization?.design||item.image}/><div><b>{item.name}</b><span>{details} · Qty {item.quantity}</span>{item.customization?.name_engraving&&<small>Engraving: {item.customization.name_engraving}</small>}{item.customization?.logo_engraving?.url&&<small>Logo uploaded</small>}</div><strong>{pkr(item.price*item.quantity)}</strong></div>})}</div>
           {error&&<div className="auth-error">{error}</div>}<button className="primary confirm-order" disabled={placing} onClick={confirm}>{placing?"Placing order…":"Confirm cash on delivery order"} <ArrowRight size={17}/></button>
         </div>}
       </section>
@@ -600,7 +834,7 @@ function AdminOrderEditor({order,onUpdated}) {
   };
   return <article className="admin-order-card">
     <div className="admin-order-summary"><div><small>ORDER</small><b>#{order.id.slice(0,8).toUpperCase()}</b></div><div><small>RECEIVED</small><span>{new Date(order.created_at).toLocaleDateString("en-PK")}</span></div><strong>{pkr(order.total_amount)}</strong></div>
-    <div className="admin-order-items">{(order.order_items||[]).map(item=>{const custom=item.customization||{};return <div key={item.id}><b>{item.product_variants?.products?.name||"Product"} × {item.quantity}</b><span>{[custom.gender,item.product_variants?.size,item.product_variants?.colors?.name,custom.sleeve&&`${custom.sleeve} sleeve`,custom.trouser_style].filter(Boolean).join(" · ")}</span>{custom.name_engraving&&<small>Name engraving: {custom.name_engraving}</small>}{custom.logo_engraving?.url&&<a href={custom.logo_engraving.url} target="_blank" rel="noreferrer">View customer logo</a>}{Object.keys(custom.measurements||{}).length>0&&<small>Custom measurements: {Object.entries(custom.measurements).filter(([,value])=>value).map(([key,value])=>`${key.replaceAll("_"," ")} ${value}″`).join(", ")}</small>}</div>})}</div>
+    <div className="admin-order-items">{(order.order_items||[]).map(item=>{const custom=item.customization||{};const details=describeCustomization(custom)||[item.product_variants?.size,item.product_variants?.colors?.name].filter(Boolean).join(" · ")||"Standard";return <div key={item.id}><b>{item.product_variants?.products?.name||"Product"} × {item.quantity}</b><span>{details}</span>{custom.name_engraving&&<small>Name engraving: {custom.name_engraving}</small>}{custom.logo_engraving?.url&&<a href={custom.logo_engraving.url} target="_blank" rel="noreferrer">View customer logo</a>}{Object.keys(custom.measurements||{}).length>0&&<small>Custom measurements: {Object.entries(custom.measurements).filter(([,value])=>value).map(([key,value])=>`${key.replaceAll("_"," ")} ${value}″`).join(", ")}</small>}</div>})}</div>
     <div className="admin-order-controls">
       <label>Status<select value={status} disabled={["cancelled","refunded"].includes(order.status)} onChange={event=>setStatus(event.target.value)}>{!adminOrderStatuses.some(([value])=>value===status)&&<option value={status}>{status}</option>}{adminOrderStatuses.map(([value,label])=><option value={value} key={value}>{label}</option>)}</select></label>
       <label className="admin-order-message">Custom message <small>{message.length}/500</small><textarea rows="2" maxLength="500" value={message} onChange={event=>setMessage(event.target.value)} placeholder="Optional update visible to the customer"/></label>
@@ -621,7 +855,7 @@ function Admin({ user, profile, authReady, catalogLoading, onLogin, products, on
   const [saving,setSaving] = useState(false);
   const [formError,setFormError] = useState("");
   const [formSuccess,setFormSuccess] = useState("");
-  const [form,setForm] = useState({name:"",description:"",category_id:"",cloth_type_id:"",gender:"unisex",product_mode:"style",base_price:"",is_featured:false});
+  const [form,setForm] = useState({name:"",description:"",category_id:"",cloth_type_id:"",gender:"unisex",product_mode:"style",base_price:"",sale_price:"",is_featured:false});
   const [selectedColors,setSelectedColors] = useState([]);
   const [sizes,setSizes] = useState("XS, S, M, L, XL");
   const [variantDefaults,setVariantDefaults] = useState({stock_quantity:"0",price_override:""});
@@ -653,7 +887,7 @@ function Admin({ user, profile, authReady, catalogLoading, onLogin, products, on
   });
   const resetEditor = () => {
     setEditingId(null); setProductImages([]); setRemovedImageFileIds([]); setUploadError(""); setFormError(""); setFormSuccess("");
-    setForm({name:"",description:"",category_id:"",cloth_type_id:"",gender:"unisex",product_mode:"style",base_price:"",is_featured:false});
+    setForm({name:"",description:"",category_id:"",cloth_type_id:"",gender:"unisex",product_mode:"style",base_price:"",sale_price:"",is_featured:false});
     setSelectedColors([]); setSizes("XS, S, M, L, XL"); setVariantDefaults({stock_quantity:"0",price_override:""}); setExistingVariants([]);
   };
   const openNew = () => { resetEditor(); setShowForm(true); };
@@ -661,7 +895,7 @@ function Admin({ user, profile, authReady, catalogLoading, onLogin, products, on
     setEditingId(product.id);
     setProductImages(product.images.map(image=>({url:image.originalUrl||image.url,fileId:image.fileId,thumbnailUrl:image.url,isNew:false})));
     setRemovedImageFileIds([]);
-    setForm({name:product.name,description:product.description||"",category_id:product.categoryId||"",cloth_type_id:product.clothTypeId||"",gender:product.genderValue||product.gender.toLowerCase(),product_mode:product.productMode||"style",base_price:String(product.price),is_featured:product.isFeatured});
+    setForm({name:product.name,description:product.description||"",category_id:product.categoryId||"",cloth_type_id:product.clothTypeId||"",gender:product.genderValue||product.gender.toLowerCase(),product_mode:product.productMode||"style",base_price:String(product.regularPrice||product.price),sale_price:product.salePrice==null?"":String(product.salePrice),is_featured:product.isFeatured});
     setExistingVariants(product.variants);
     setSelectedColors([...new Set(product.variants.map(v=>v.colors?.id).filter(Boolean))]);
     setSizes([...new Set(product.variants.map(v=>v.size).filter(Boolean))].join(", "));
@@ -683,6 +917,7 @@ function Admin({ user, profile, authReady, catalogLoading, onLogin, products, on
       const sizeOptions = [...new Set(sizes.split(",").map(value=>value.trim()).filter(Boolean))];
       if (!selectedColors.length) throw new Error("Select at least one colour.");
       if (!sizeOptions.length) throw new Error("Enter at least one size.");
+      if (form.sale_price !== "" && Number(form.sale_price) >= Number(form.base_price)) throw new Error("Sale price must be lower than the base price.");
       const skuRoot = `${slugify(form.name)}-${editingId?.slice(0,6)||Date.now().toString().slice(-6)}`;
       const generatedVariants = selectedColors.flatMap(colorId=>sizeOptions.map(size=>{
         const previous = existingVariants.find(v=>v.colors?.id===colorId&&v.size===size);
@@ -698,7 +933,7 @@ function Admin({ user, profile, authReady, catalogLoading, onLogin, products, on
           name: form.name.trim(), slug: `${slugify(form.name)}-${Date.now().toString().slice(-6)}`,
           description: form.description.trim(), category_id: form.category_id,
           cloth_type_id: form.cloth_type_id || null, gender: form.gender, product_mode:form.product_mode,
-          base_price: Number(form.base_price), is_active: true, is_featured: form.is_featured
+          base_price: Number(form.base_price), sale_price: form.sale_price === "" ? null : Number(form.sale_price), is_active: true, is_featured: form.is_featured
         },
         variants: generatedVariants,
         images: productImages.map(image=>({url:image.url,fileId:image.fileId}))
@@ -714,10 +949,10 @@ function Admin({ user, profile, authReady, catalogLoading, onLogin, products, on
     } catch (error) { setFormError(error.message); }
     finally { setSaving(false); }
   };
-  if (!authReady) return <main className="auth-page"><section className="account-card"><p>Checking your account…</p></section></main>;
+  if (!authReady) return <AdminShellSkeleton/>;
   if (!user || !["admin","staff"].includes(profile?.role)) return <main className="auth-page"><section className="account-card"><ShieldCheck size={35}/><p className="eyebrow">RESTRICTED AREA</p><h1>Admin access required.</h1><p>Sign in with an administrator or staff account to manage the store.</p><button className="primary" onClick={onLogin}>Sign in</button></section></main>;
   const revenue=adminData.orders.reduce((sum,o)=>["paid","processing","shipped","delivered"].includes(o.status)?sum+Number(o.total_amount):sum,0);
-  const metrics=[["Catalog products",catalogLoading?"—":String(products.length),catalogLoading?"Loading":"Live"],["Recorded revenue",pkr(revenue),"From orders"],["Pending orders",String(adminData.orders.filter(o=>o.status==="pending").length),"Needs review"],["Low stock",catalogLoading?"—":String(products.filter(p=>p.stock<10).length),"Products"]];
+  const metrics=[["Catalog products",catalogLoading?null:String(products.length),catalogLoading?null:"Live"],["Recorded revenue",pkr(revenue),"From orders"],["Pending orders",String(adminData.orders.filter(o=>o.status==="pending").length),"Needs review"],["Low stock",catalogLoading?null:String(products.filter(p=>p.stock<10).length),catalogLoading?null:"Products"]];
   return <main className="admin">
     <div className="admin-title"><div><p className="eyebrow">ADMIN / OVERVIEW</p><h1>Good morning, {profile?.full_name?.split(" ")[0] || "Admin"}.</h1><p>Manage the live Supabase catalog and ImageKit media.</p></div><button className="primary" onClick={()=>showForm?(resetEditor(),setShowForm(false)):openNew()}>{showForm?<X size={17}/>:<Plus size={17}/>} {showForm?"Close form":"Add product"}</button></div>
     {formError && !showForm && <div className="auth-error admin-page-error">{formError}</div>}
@@ -726,6 +961,7 @@ function Admin({ user, profile, authReady, catalogLoading, onLogin, products, on
       <div className="editor-grid">
         <label>Product name *<input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required/></label>
         <label>Base price *<input type="number" min="0" step=".01" value={form.base_price} onChange={e=>setForm({...form,base_price:e.target.value})} required/></label>
+        <label>Sale price <small>Optional</small><input type="number" min="0" step=".01" value={form.sale_price} onChange={e=>setForm({...form,sale_price:e.target.value})} placeholder="Leave empty for no sale"/></label>
         <label>Category *<select value={form.category_id} onChange={e=>setForm({...form,category_id:e.target.value})} required><option value="">Choose category</option>{adminData.categories.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
         <label>Cloth type<select value={form.cloth_type_id} onChange={e=>setForm({...form,cloth_type_id:e.target.value})}><option value="">Choose fabric</option>{adminData.clothTypes.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
         <label>Gender fit<select value={form.gender} onChange={e=>setForm({...form,gender:e.target.value})}><option value="unisex">Unisex</option><option value="women">Women</option><option value="men">Men</option></select></label>
@@ -746,10 +982,10 @@ function Admin({ user, profile, authReady, catalogLoading, onLogin, products, on
       {formError&&<div className="auth-error">{formError}</div>}{formSuccess&&<div className="auth-message">{formSuccess}</div>}
       <div className="editor-actions"><button type="button" onClick={()=>{resetEditor();setShowForm(false)}}>Cancel</button><button className="primary" disabled={saving||uploading}>{saving?"Saving…":editingId?"Save changes":"Publish product"} <ArrowRight size={16}/></button></div>
     </form>}
-    <div className="metrics">{metrics.map((m,i)=><div key={m[0]}><span>{i===0?<BarChart3/>:i===1?<ShoppingBag/>:i===2?<Package/>:<Sparkles/>}</span><p>{m[0]}</p><h2>{m[1]}</h2><small>{m[2]}</small></div>)}</div>
+    <div className="metrics">{metrics.map((m,i)=><div key={m[0]}><span>{i===0?<BarChart3/>:i===1?<ShoppingBag/>:i===2?<Package/>:<Sparkles/>}</span><p>{m[0]}</p>{m[1] == null ? <span className="skeleton skeleton-title small"/> : <h2>{m[1]}</h2>}{m[2] == null ? <span className="skeleton skeleton-line short"/> : <small>{m[2]}</small>}</div>)}</div>
     <section className="admin-orders-panel"><div className="panel-head"><div><p className="eyebrow">FULFILMENT</p><h2>Manage received orders</h2></div><span>{adminData.orders.length} recent</span></div>{adminData.orders.length?<div className="admin-order-list">{adminData.orders.map(order=><AdminOrderEditor key={order.id} order={order} onUpdated={loadAdminData}/>)}</div>:<div className="admin-empty">No orders yet.</div>}</section>
     <section className="inventory-panel"><div className="panel-head"><h2>Inventory alerts</h2></div>{products.filter(p=>p.stock<10).length?products.filter(p=>p.stock<10).map(p=><div className="stock-row" key={p.id}>{p.image&&<img src={p.image}/>}<div><b>{p.name}</b><span>{p.colors.join(", ")}</span></div><strong>{p.stock} left</strong></div>):<div className="admin-empty">No low-stock products.</div>}</section>
-    <section className="admin-products"><div className="panel-head"><h2>Live products</h2><span>{catalogLoading?"Loading…":`${products.length} total`}</span></div>{catalogLoading?<ProductSkeletons count={4}/>:products.length?<div className="product-table product-actions-table"><div className="table-header"><span>Product</span><span>Category</span><span>Stock</span><span>Price</span><span>Status</span><span>Actions</span></div>{products.map(p=><div key={p.id}><span>{p.image&&<img src={p.image}/>}<b>{p.name}</b></span><span>{p.category}</span><span>{p.stock}</span><span>{pkr(p.price)}</span><span className="active"><i/> Active</span><span className="row-actions"><button onClick={()=>openEdit(p)}>Edit</button><button onClick={()=>removeProduct(p)}><Trash2 size={14}/> Archive</button></span></div>)}</div>:<div className="admin-empty large">No products yet. Use “Add product” to publish your first item.</div>}</section>
+    <section className="admin-products"><div className="panel-head"><h2>Live products</h2><span>{catalogLoading?<span className="skeleton skeleton-line short"/>:`${products.length} total`}</span></div>{catalogLoading?<ProductSkeletons count={4}/>:products.length?<div className="product-table product-actions-table"><div className="table-header"><span>Product</span><span>Category</span><span>Stock</span><span>Price</span><span>Status</span><span>Actions</span></div>{products.map(p=><div key={p.id}><span>{p.image&&<img src={p.image}/>}<b>{p.name}</b></span><span>{p.category}</span><span>{p.stock}</span><span className={p.isOnSale?"sale-price":""}>{p.isOnSale&&<del>{pkr(p.regularPrice)}</del>}{pkr(p.price)}</span><span className="active"><i/> Active</span><span className="row-actions"><button onClick={()=>openEdit(p)}>Edit</button><button onClick={()=>removeProduct(p)}><Trash2 size={14}/> Archive</button></span></div>)}</div>:<div className="admin-empty large">No products yet. Use “Add product” to publish your first item.</div>}</section>
   </main>;
 }
 
