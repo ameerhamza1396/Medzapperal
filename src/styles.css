@@ -415,6 +415,10 @@ img,video{max-width:100%}
 .desktop-story-video{display:none}
 @media(min-width:701px){
   .home-page>.hero{display:none}
+  .hero-seo{position:relative;isolation:isolate;min-height:clamp(560px,70vh,780px);display:grid;place-items:center;align-content:center;color:#f7f1e8;background:url("/src/assets/medzapperal-hero.png") center/cover no-repeat;border-bottom:0}
+  .hero-seo:before{content:"";position:absolute;inset:0;z-index:-1;background:linear-gradient(90deg,rgba(7,19,17,.72),rgba(7,19,17,.36)),linear-gradient(0deg,rgba(7,19,17,.28),rgba(7,19,17,.28))}
+  .hero-seo .eyebrow,.hero-seo h2{color:#f5f2ead9}
+  .hero-seo h1{text-shadow:0 18px 55px rgba(0,0,0,.35)}
   .desktop-story-video{display:block;background:var(--footer);padding:clamp(55px,7vw,95px) clamp(24px,8vw,120px) 0}
   .desktop-story-video video{display:block;width:min(1180px,100%);height:auto;margin:0 auto;aspect-ratio:16/9;object-fit:contain;background:#0d1312}
 }
