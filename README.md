@@ -66,9 +66,16 @@ Netlify, add:
 - `IMAGEKIT_PUBLIC_KEY`
 - `IMAGEKIT_PRIVATE_KEY` (server-only)
 - `IMAGEKIT_URL_ENDPOINT`
+- `RESEND_API_KEY` (server-only, optional but required for order emails)
+- `RESEND_FROM_EMAIL` (for example, `MEDZ APPAREL <orders@yourdomain.com>`)
+- `RESEND_REPLY_TO`
 
 Apply them to Production, Preview, and Development as appropriate. Never prefix
 the ImageKit private key with `VITE_`.
+
+Order confirmation emails are sent through the protected
+`/api/order-received-email` function after a cash-on-delivery order is placed.
+Use a verified Resend sending domain for production.
 
 ### 4. Deploy on Vercel
 

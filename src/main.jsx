@@ -9,7 +9,7 @@ import hero from "./assets/medzapperal-hero.png";
 import { AuthPage } from "./Auth";
 import { getMyProfile, isSupabaseConfigured, supabase } from "./lib/supabase";
 import { deleteFromImageKit, uploadCustomerLogo, uploadToImageKit } from "./lib/imagekit";
-import { createProductWithVariants, deleteProduct, fetchAdminData, fetchCatalog, fetchDefaultAddress, fetchStorefrontContent, placeCodOrder, saveDefaultAddress, slugify, updateOrderStatus, updateProductWithVariants } from "./lib/store";
+import { createProductWithVariants, deleteProduct, fetchAdminData, fetchCatalog, fetchDefaultAddress, fetchStorefrontContent, placeCodOrder, saveDefaultAddress, sendOrderReceivedEmail, slugify, updateOrderStatus, updateProductWithVariants } from "./lib/store";
 import "./styles.css";
 
 const palette = {
@@ -802,8 +802,6 @@ function Cart({cart,setCart,open,close,onCheckout}) {
     <><div className="cart-items">{cart.map(item=>{const details=describeCustomization(item.customization)||"Standard";return <div className="cart-item" key={item.cartId}><img src={itemImage(item)}/><div><strong>{item.name}</strong><span>{details}</span>{item.customization?.name_engraving&&<small>Engraving: {item.customization.name_engraving}</small>}{item.customization?.logo_engraving?.url&&<small>Logo uploaded</small>}<b>{pkr(item.price)}</b></div><button onClick={()=>setCart(c=>c.filter(x=>x.cartId!==item.cartId))}><Trash2 size={16}/></button></div>})}</div><div className="cart-bottom"><p><span>Subtotal</span><b>{pkr(total)}</b></p><small>Shipping calculated at checkout.</small><button className="primary" onClick={onCheckout}>Checkout <ArrowRight size={17}/></button></div></>}</aside></>;
 }
 
-const pakistanCities = ["Abbottabad","Bahawalpur","Bannu","Chiniot","Dera Ghazi Khan","Faisalabad","Gilgit","Gujranwala","Gujrat","Hyderabad","Islamabad","Jacobabad","Jhelum","Karachi","Kasur","Khanewal","Khuzdar","Kohat","Lahore","Larkana","Mardan","Mirpur","Multan","Muzaffarabad","Nawabshah","Nowshera","Okara","Peshawar","Quetta","Rahim Yar Khan","Rawalpindi","Sahiwal","Sargodha","Sheikhupura","Sialkot","Sukkur","Swabi","Thatta","Turbat","Wah Cantt"];
-
 function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
   const [step,setStep]=useState("details");
   const [placing,setPlacing]=useState(false);
@@ -834,14 +832,37 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
   const subtotal=grouped.reduce((sum,item)=>sum+item.price*item.quantity,0);
   const delivery=200+(50*cart.length);
   const total=subtotal+delivery;
-  const validCity=pakistanCities.includes(address.city);
-  const review=e=>{e.preventDefault();setError("");if(!validCity)return setError("Please select a city from the list.");setStep("review")};
+  const missingAddressFields = () => {
+    const missing = [];
+    if (!address.city.trim()) missing.push("city");
+    if (!address.recipient_name.trim()) missing.push("recipient name");
+    if (!address.mobile.trim()) missing.push("mobile number");
+    if (!address.complete_address.trim()) missing.push("complete address");
+    return missing;
+  };
+  const review=e=>{
+    e.preventDefault();setError("");
+    const missing = missingAddressFields();
+    if (missing.length) return setError(`Please complete the missing field${missing.length>1?"s":""}: ${missing.join(", ")}.`);
+    setStep("review");
+  };
   const confirm=async()=>{
     const chime=prepareOrderChime();
     setPlacing(true);setError("");
     try{
       if(saveDetails)await saveDefaultAddress({userId:user.id,address,addressId:savedAddressId});
       const result=await placeCodOrder({shippingAddress:address,items:grouped});
+      sendOrderReceivedEmail({
+        order: result,
+        shippingAddress: address,
+        total,
+        items: grouped.map(item=>({
+          name:item.name,
+          quantity:item.quantity,
+          unit_price:item.price,
+          customization:item.customization || {}
+        }))
+      }).catch(()=>{});
       setOrder(result);setCart([]);setStep("success");chime.play();
     }catch(e){chime.dispose();setError(e.message)}finally{setPlacing(false)}
   };
@@ -855,11 +876,11 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
     <div className="checkout-title"><p className="eyebrow">SECURE CHECKOUT</p><h1>{step==="details"?"Delivery details":"Review your order"}</h1><div className="checkout-steps"><span className="active">1 Delivery</span><i/><span className={step==="review"?"active":""}>2 Review</span><i/><span>3 Confirmation</span></div></div>
     <div className="checkout-layout">
       <section className="checkout-main">
-        {step==="details"?<form className="checkout-form" onSubmit={review}>
+        {step==="details"?<form className="checkout-form" onSubmit={review} noValidate>
           <div className="form-section-title"><MapPin/><div><h2>Shipping address</h2><p>We currently deliver throughout Pakistan.</p></div></div>
           <div className="checkout-fields">
             <label>Country<input value="Pakistan" disabled/></label>
-            <label>City *<input list="pakistan-cities" value={address.city} onChange={e=>setAddress({...address,city:e.target.value})} placeholder="Search and select city" required/><datalist id="pakistan-cities">{pakistanCities.map(city=><option key={city} value={city}/>)}</datalist></label>
+            <label>City *<input value={address.city} onChange={e=>setAddress({...address,city:e.target.value})} placeholder="Enter your city" required/></label>
             <label className="wide">Recipient name *<input value={address.recipient_name} onChange={e=>setAddress({...address,recipient_name:e.target.value})} required/></label>
             <label>Mobile number *<input type="tel" value={address.mobile} onChange={e=>setAddress({...address,mobile:e.target.value})} placeholder="03XX XXXXXXX" pattern="(?:\\+92|0)3[0-9]{9}" required/></label>
             <label>Secondary mobile number <small>Optional</small><input type="tel" value={address.secondary_mobile} onChange={e=>setAddress({...address,secondary_mobile:e.target.value})} placeholder="03XX XXXXXXX" pattern="(?:\\+92|0)3[0-9]{9}|^$"/></label>
@@ -868,12 +889,12 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
           <label className="save-address-option"><input type="checkbox" checked={saveDetails} onChange={event=>setSaveDetails(event.target.checked)}/><span><b>Save these delivery details</b><small>Securely prefill this address the next time you check out.</small></span></label>
           <div className="payment-title"><h2>Payment method</h2></div>
           <div className="payment-options"><button type="button" className="payment-option disabled" disabled><CreditCard/><span><b>Bank cards</b><small>Coming soon</small></span></button><button type="button" className="payment-option selected"><Banknote/><span><b>Cash on delivery</b><small>Pay when your order arrives</small></span><Check/></button></div>
-          {error&&<div className="auth-error">{error}</div>}<button className="primary checkout-next">Review order <ArrowRight size={17}/></button>
+          <button className="primary checkout-next">Review order <ArrowRight size={17}/></button>{error&&<div className="auth-error checkout-form-error">{error}</div>}
         </form>:<div className="review">
           <div className="review-block"><div className="review-head"><h2>Delivery address</h2><button onClick={()=>setStep("details")}>Edit</button></div><b>{address.recipient_name}</b><p>{address.complete_address}<br/>{address.city}, Pakistan<br/>{address.mobile}{address.secondary_mobile&&` · ${address.secondary_mobile}`}</p>{saveDetails&&<small className="save-address-note"><Check size={13}/> These details will be saved to your account.</small>}</div>
           <div className="review-block"><h2>Payment</h2><p><Banknote size={17}/> Cash on delivery</p></div>
           <div className="review-block"><h2>Items</h2>{grouped.map(item=>{const details=describeCustomization(item.customization)||"Standard";return <div className="review-item" key={item.groupKey}><img src={itemImage(item)}/><div><b>{item.name}</b><span>{details} · Qty {item.quantity}</span>{item.customization?.name_engraving&&<small>Engraving: {item.customization.name_engraving}</small>}{item.customization?.logo_engraving?.url&&<small>Logo uploaded</small>}</div><strong>{pkr(item.price*item.quantity)}</strong></div>})}</div>
-          {error&&<div className="auth-error">{error}</div>}<button className="primary confirm-order" disabled={placing} onClick={confirm}>{placing?"Placing order…":"Confirm cash on delivery order"} <ArrowRight size={17}/></button>
+          <button className="primary confirm-order" disabled={placing} onClick={confirm}>{placing?"Placing order…":"Confirm cash on delivery order"} <ArrowRight size={17}/></button>{error&&<div className="auth-error checkout-form-error">{error}</div>}
         </div>}
       </section>
       <aside className="checkout-summary"><h2>Order summary</h2>{grouped.map(item=><div className="summary-item" key={item.groupKey}><span>{item.name} <small>× {item.quantity}</small></span><b>{pkr(item.price*item.quantity)}</b></div>)}<div className="summary-line"><span>Subtotal</span><b>{pkr(subtotal)}</b></div><div className="summary-line"><span>Delivery</span><b>{pkr(delivery)}</b></div><div className="summary-total"><span>Total</span><b>{pkr(total)}</b></div><p>Taxes, if applicable, are included.</p></aside>

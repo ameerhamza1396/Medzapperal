@@ -126,6 +126,17 @@ export async function placeCodOrder({ shippingAddress, items }) {
   return Array.isArray(data) ? data[0] : data;
 }
 
+export async function sendOrderReceivedEmail({ order, shippingAddress, items, total }) {
+  if (!supabase) return;
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return;
+  await fetch("/api/order-received-email", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ order, shippingAddress, items, total })
+  });
+}
+
 export async function fetchDefaultAddress(userId) {
   if (!supabase || !userId) return null;
   const { data, error } = await supabase
