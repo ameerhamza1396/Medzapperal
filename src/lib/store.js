@@ -6,7 +6,7 @@ export async function fetchCatalog() {
   const { data, error } = await supabase
     .from("products")
     .select(`
-      id, name, slug, description, gender, product_mode, base_price, sale_price, is_featured, created_at, category_id, cloth_type_id,
+      id, name, slug, description, gender, product_mode, base_price, sale_price, is_featured, is_new_arrival, created_at, category_id, cloth_type_id,
       categories(name,slug,image_url),
       cloth_types(name),
       product_images(id, url, file_id, sort_order, variant_id),
@@ -49,6 +49,7 @@ export async function fetchCatalog() {
       variants,
       badge: product.sale_price != null && Number(product.sale_price) < Number(product.base_price) ? "Sale" : product.is_featured ? "Featured" : null,
       isFeatured: product.is_featured,
+      isNewArrival: product.is_new_arrival,
       createdAt: product.created_at
     };
   });

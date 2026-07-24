@@ -54,9 +54,10 @@ The admin dashboard includes a protected upload test. Successful uploads return
 both the ImageKit URL and `fileId`, ready to store in `product_images`.
 `/api/imagekit-delete` provides protected deletion by `fileId`.
 
-### 3. Vercel environment variables
+### 3. Hosting environment variables
 
-Copy `.env.example` to `.env.local` for local development. In Vercel, add:
+Copy `.env.example` to `.env.local` for local development. In Vercel or
+Netlify, add:
 
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
@@ -69,7 +70,7 @@ Copy `.env.example` to `.env.local` for local development. In Vercel, add:
 Apply them to Production, Preview, and Development as appropriate. Never prefix
 the ImageKit private key with `VITE_`.
 
-### 4. Deploy
+### 4. Deploy on Vercel
 
 Import the repository into Vercel. The included `vercel.json` configures Vite,
 SPA routing, production output, and API security headers.
@@ -81,3 +82,16 @@ pnpm build
 
 Before launch, set the Supabase **Site URL** to the final Vercel domain and add
 any preview domains you intend to use under Redirect URLs.
+
+### 5. Deploy on Netlify
+
+Import the repository into Netlify. The included `netlify.toml` configures:
+
+- Build command: `pnpm run build`
+- Publish directory: `dist`
+- Netlify Functions for ImageKit auth/delete endpoints
+- SPA redirects so shared product URLs and refreshes work
+
+Add the same environment variables listed above in **Site configuration →
+Environment variables**. Before launch, add the final Netlify domain and preview
+deploy domains to Supabase **Authentication → URL Configuration**.

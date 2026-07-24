@@ -4,12 +4,14 @@ import { isSupabaseConfigured, supabase } from "./lib/supabase";
 import { cancelPendingOrder, fetchCustomerAccount } from "./lib/store";
 
 const pkr = value => new Intl.NumberFormat("en-PK",{style:"currency",currency:"PKR",maximumFractionDigits:0}).format(Number(value)||0);
+const addonLabels = { sleeves:"Sleeves", scrub_cap:"Scrub cap", inner:"Inner" };
 const describeOrderDetails = (custom,variant) => [
   custom?.gender,
   custom?.color || variant?.colors?.name,
   custom?.size || variant?.size,
   custom?.sleeve && `${custom.sleeve} sleeve`,
   custom?.trouser_style,
+  custom?.addons?.length ? `Add-ons: ${custom.addons.map(item=>addonLabels[item]||item).join(", ")}` : null,
   custom?.design && "Selected design"
 ].filter(Boolean).join(" · ") || "Standard";
 const statusCopy = {
