@@ -20,6 +20,17 @@ const palette = {
   Charcoal:"#46484B", Lavender:"#9363B5"
 };
 const pkr = value => new Intl.NumberFormat("en-PK",{style:"currency",currency:"PKR",maximumFractionDigits:0}).format(Number(value)||0);
+const CART_STORAGE_KEY = "medz-cart";
+const CHECKOUT_RETURN_KEY = "medz-return-checkout";
+const readStoredCart = () => {
+  try {
+    const stored = localStorage.getItem(CART_STORAGE_KEY);
+    const parsed = stored ? JSON.parse(stored) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
 const normalizeText = value => String(value || "").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
 const productKind = product => {
   const category = normalizeText(product?.categorySlug || product?.category);
@@ -66,6 +77,7 @@ const addonOptions = [
 const addonLabels = Object.fromEntries(addonOptions.map(option=>[option.value,option.label]));
 const addonPrices = Object.fromEntries(addonOptions.map(option=>[option.value,option.price]));
 const addonFee = customization => (customization?.addons || []).reduce((sum,item)=>sum+(addonPrices[item]||0),0);
+const itemImage = item => item?.customization?.design?.url || item?.image || "";
 const scrubDesignOptions = [
   { title:"Classic", url:"/media/scrub-designs/01-classic.jpg" },
   { title:"Double Gear", url:"/media/scrub-designs/02-double-gear.jpg" },
@@ -265,7 +277,7 @@ function App() {
   const [products, setProducts] = useState([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState("");
-  const [cart, setCart] = useState([]);
+  const [cart, setCart] = useState(readStoredCart);
   const [cartOpen, setCartOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [query, setQuery] = useState(initialRoute.query || "");
@@ -278,6 +290,12 @@ function App() {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
     localStorage.setItem("mz-theme", dark ? "dark" : "light");
   }, [dark]);
+  useEffect(() => {
+    try {
+      if (cart.length) localStorage.setItem(CART_STORAGE_KEY,JSON.stringify(cart));
+      else localStorage.removeItem(CART_STORAGE_KEY);
+    } catch {}
+  },[cart]);
   useEffect(() => {
     const originalUrl = window.location.pathname + window.location.search + window.location.hash;
     if (originalUrl !== "/" && !window.history.state?.medzBootstrapped) {
@@ -378,9 +396,9 @@ function App() {
     {page === "colours" && <ColourPalette products={products} onSelect={colour=>goShop(`colour:${colour}`)} />}
     {page === "product" && selected && <Product product={selected} add={add} openProduct={openProduct} products={products} onBack={()=>navigate("home")}/>}
     {page === "product" && !selected && (catalogLoading ? <ProductPageSkeleton/> : <main className="auth-page"><section className="account-card"><Package/><p className="eyebrow">PRODUCT</p><h1>Product not found</h1><button className="primary" onClick={()=>navigate("home")}>Back to home</button></section></main>)}
-    {page === "auth" && <AuthPage user={user} profile={profile} onDone={() => navigate("home")} onAdmin={() => navigate("admin")} onContact={() => navigate("contact")} onCheckout={() => navigate("checkout")} onSignOut={async () => { await supabase?.auth.signOut(); navigate("home"); }}/>}
+    {page === "auth" && <AuthPage user={user} profile={profile} onDone={() => {const returnToCheckout=localStorage.getItem(CHECKOUT_RETURN_KEY)==="1";localStorage.removeItem(CHECKOUT_RETURN_KEY);navigate(returnToCheckout?"checkout":"home",{replace:true});}} onAdmin={() => navigate("admin")} onContact={() => navigate("contact")} onCheckout={() => navigate("checkout")} onSignOut={async () => { await supabase?.auth.signOut(); navigate("home"); }}/>}
     {page === "admin" && <Admin user={user} profile={profile} authReady={authReady} catalogLoading={catalogLoading} onLogin={() => navigate("auth")} products={products} onCreated={loadCatalog} />}
-    {page === "checkout" && <Checkout user={user} profile={profile} cart={cart} setCart={setCart} onLogin={()=>navigate("auth")} onShop={()=>goShop("All")} />}
+    {page === "checkout" && <Checkout user={user} profile={profile} cart={cart} setCart={setCart} onLogin={()=>{localStorage.setItem(CHECKOUT_RETURN_KEY,"1");navigate("auth")}} onShop={()=>goShop("All")} />}
     {["terms","shipping","privacy"].includes(page) && <PolicyPage policy={policyContent[page]} />}
     {page === "contact" && <ContactPage />}
     {page !== "home" && <Reviews reviews={reviews}/>}
@@ -781,7 +799,7 @@ function Cart({cart,setCart,open,close,onCheckout}) {
   const total=cart.reduce((s,p)=>s+p.price,0);
   return <><div className={`overlay ${open?"show":""}`} onClick={close}/><aside className={`cart-drawer ${open?"open":""}`}><div className="cart-head"><h2>Your bag <span>{cart.length}</span></h2><button onClick={close}><X/></button></div>
     {!cart.length ? <div className="empty"><ShoppingBag/><h3>Your bag is taking a break.</h3><p>Fill it with something made for the shift.</p><button className="primary" onClick={close}>Continue shopping</button></div> :
-    <><div className="cart-items">{cart.map(item=>{const details=describeCustomization(item.customization)||"Standard";return <div className="cart-item" key={item.cartId}><img src={item.customization?.design||item.image}/><div><strong>{item.name}</strong><span>{details}</span>{item.customization?.name_engraving&&<small>Engraving: {item.customization.name_engraving}</small>}{item.customization?.logo_engraving?.url&&<small>Logo uploaded</small>}<b>{pkr(item.price)}</b></div><button onClick={()=>setCart(c=>c.filter(x=>x.cartId!==item.cartId))}><Trash2 size={16}/></button></div>})}</div><div className="cart-bottom"><p><span>Subtotal</span><b>{pkr(total)}</b></p><small>Shipping calculated at checkout.</small><button className="primary" onClick={onCheckout}>Checkout <ArrowRight size={17}/></button></div></>}</aside></>;
+    <><div className="cart-items">{cart.map(item=>{const details=describeCustomization(item.customization)||"Standard";return <div className="cart-item" key={item.cartId}><img src={itemImage(item)}/><div><strong>{item.name}</strong><span>{details}</span>{item.customization?.name_engraving&&<small>Engraving: {item.customization.name_engraving}</small>}{item.customization?.logo_engraving?.url&&<small>Logo uploaded</small>}<b>{pkr(item.price)}</b></div><button onClick={()=>setCart(c=>c.filter(x=>x.cartId!==item.cartId))}><Trash2 size={16}/></button></div>})}</div><div className="cart-bottom"><p><span>Subtotal</span><b>{pkr(total)}</b></p><small>Shipping calculated at checkout.</small><button className="primary" onClick={onCheckout}>Checkout <ArrowRight size={17}/></button></div></>}</aside></>;
 }
 
 const pakistanCities = ["Abbottabad","Bahawalpur","Bannu","Chiniot","Dera Ghazi Khan","Faisalabad","Gilgit","Gujranwala","Gujrat","Hyderabad","Islamabad","Jacobabad","Jhelum","Karachi","Kasur","Khanewal","Khuzdar","Kohat","Lahore","Larkana","Mardan","Mirpur","Multan","Muzaffarabad","Nawabshah","Nowshera","Okara","Peshawar","Quetta","Rahim Yar Khan","Rawalpindi","Sahiwal","Sargodha","Sheikhupura","Sialkot","Sukkur","Swabi","Thatta","Turbat","Wah Cantt"];
@@ -854,7 +872,7 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
         </form>:<div className="review">
           <div className="review-block"><div className="review-head"><h2>Delivery address</h2><button onClick={()=>setStep("details")}>Edit</button></div><b>{address.recipient_name}</b><p>{address.complete_address}<br/>{address.city}, Pakistan<br/>{address.mobile}{address.secondary_mobile&&` · ${address.secondary_mobile}`}</p>{saveDetails&&<small className="save-address-note"><Check size={13}/> These details will be saved to your account.</small>}</div>
           <div className="review-block"><h2>Payment</h2><p><Banknote size={17}/> Cash on delivery</p></div>
-          <div className="review-block"><h2>Items</h2>{grouped.map(item=>{const details=describeCustomization(item.customization)||"Standard";return <div className="review-item" key={item.groupKey}><img src={item.customization?.design||item.image}/><div><b>{item.name}</b><span>{details} · Qty {item.quantity}</span>{item.customization?.name_engraving&&<small>Engraving: {item.customization.name_engraving}</small>}{item.customization?.logo_engraving?.url&&<small>Logo uploaded</small>}</div><strong>{pkr(item.price*item.quantity)}</strong></div>})}</div>
+          <div className="review-block"><h2>Items</h2>{grouped.map(item=>{const details=describeCustomization(item.customization)||"Standard";return <div className="review-item" key={item.groupKey}><img src={itemImage(item)}/><div><b>{item.name}</b><span>{details} · Qty {item.quantity}</span>{item.customization?.name_engraving&&<small>Engraving: {item.customization.name_engraving}</small>}{item.customization?.logo_engraving?.url&&<small>Logo uploaded</small>}</div><strong>{pkr(item.price*item.quantity)}</strong></div>})}</div>
           {error&&<div className="auth-error">{error}</div>}<button className="primary confirm-order" disabled={placing} onClick={confirm}>{placing?"Placing order…":"Confirm cash on delivery order"} <ArrowRight size={17}/></button>
         </div>}
       </section>
