@@ -58,7 +58,24 @@ const engravingFee = customization => {
   if (customization?.logo_engraving?.url) total += 200;
   return total;
 };
-const addonLabels = { sleeves:"Sleeves", scrub_cap:"Scrub cap", inner:"Inner" };
+const addonOptions = [
+  { value:"sleeves", label:"Black sleeves", price:150 },
+  { value:"inner", label:"Black Inner", price:1000 },
+  { value:"scrub_cap", label:"Matching scrub cap", price:700 }
+];
+const addonLabels = Object.fromEntries(addonOptions.map(option=>[option.value,option.label]));
+const addonPrices = Object.fromEntries(addonOptions.map(option=>[option.value,option.price]));
+const addonFee = customization => (customization?.addons || []).reduce((sum,item)=>sum+(addonPrices[item]||0),0);
+const scrubDesignOptions = [
+  { title:"Classic", url:"/media/scrub-designs/01-classic.jpg" },
+  { title:"Double Gear", url:"/media/scrub-designs/02-double-gear.jpg" },
+  { title:"Drip Fit", url:"/media/scrub-designs/03-drip-fit.jpg" },
+  { title:"Pleat Flex", url:"/media/scrub-designs/04-pleat-flex.jpg" },
+  { title:"Zipster", url:"/media/scrub-designs/05-zipster.jpg" },
+  { title:"Zipease", url:"/media/scrub-designs/06-zipease.jpg" },
+  { title:"Mandarin Classic", url:"/media/scrub-designs/07-mandarin-classic.jpg" },
+  { title:"Mandarin Zipper", url:"/media/scrub-designs/08-mandarin-zipper.jpg" }
+];
 const variantForSelection = (product, size, color, attributes = productAttributes(product)) => {
   const variants = product.variants || [];
   return variants.find(variant =>
@@ -73,7 +90,7 @@ const describeCustomization = custom => [
   custom?.sleeve && `${custom.sleeve} sleeve`,
   custom?.trouser_style,
   custom?.addons?.length ? `Add-ons: ${custom.addons.map(item=>addonLabels[item]||item).join(", ")}` : null,
-  custom?.design && "Selected design"
+  custom?.design?.title ? `Design: ${custom.design.title}` : custom?.design && "Selected design"
 ].filter(Boolean).join(" · ");
 const titleFromSlug = value => String(value || "").split("-").filter(Boolean).map(word=>word.charAt(0).toUpperCase()+word.slice(1)).join(" ");
 const routeFromLocation = () => {
@@ -346,7 +363,7 @@ function App() {
     }
     const basePrice = variant.price_override == null ? product.price : Number(variant.price_override);
     const measurementFee = Object.values(customization.measurements || {}).filter(value=>String(value).trim()).length * 100;
-    const price = basePrice + measurementFee + engravingFee(customization);
+    const price = basePrice + measurementFee + engravingFee(customization) + addonFee(customization);
     const selectedSize = attributes.size ? variant.size : "";
     const selectedColor = attributes.color ? variant.colors?.name || color : "";
     setCart(c => [...c, { ...product, price, basePrice, customization:{...customization,size:selectedSize,color:selectedColor}, cartId: `${Date.now()}-${Math.random()}`, size:selectedSize, color:selectedColor, variantId:variant.id }]);
@@ -462,7 +479,15 @@ function Home({goShop,openProduct,add,products=[],catalogLoading,categories=[],r
     elements.forEach(element=>observer.observe(element));
     return () => observer.disconnect();
   },[products.length,catalogLoading]);
-  const visibleCategories = categories.length ? categories : [...new Set(products.map(product=>product.category))].map((name,index)=>({id:name,name,sort_order:index}));
+  const categoryPriority = category => {
+    const name = normalizeText(category.name);
+    if (name === "scrubs" || name.includes("signature scrub")) return -30;
+    if (name.includes("inner")) return -20;
+    if (name.includes("scrub upper")) return -10;
+    return Number(category.sort_order || 0);
+  };
+  const visibleCategories = [...(categories.length ? categories : [...new Set(products.map(product=>product.category))].map((name,index)=>({id:name,name,sort_order:index})))]
+    .sort((a,b)=>categoryPriority(a)-categoryPriority(b));
   const categoryImage = category =>
     category.image_url || products.find(product =>
       product.image && product.category?.toLowerCase() === category.name.toLowerCase()
@@ -646,9 +671,10 @@ function Product({product,add,openProduct,products,onBack}) {
   const [measurements,setMeasurements] = useState({chest:"",waist:"",shirt_length:"",sleeve_length:"",trouser_length:""});
   const [trouserStyle,setTrouserStyle] = useState("Straight");
   const [design,setDesign] = useState(product.images?.[0]?.url || product.image);
+  const [scrubDesign,setScrubDesign] = useState(scrubDesignOptions[0]);
   const [sizeChart,setSizeChart] = useState(false);
   const [shareStatus,setShareStatus] = useState("");
-  const [zoomOpen,setZoomOpen] = useState(false);
+  const [galleryZoom,setGalleryZoom] = useState({active:false,x:50,y:50});
   const [addons,setAddons] = useState([]);
   const galleryImages = product.images?.length ? product.images : [{id:"primary",url:product.image}];
   const colourBased = product.productMode === "colour" && attributes.design !== false;
@@ -657,6 +683,7 @@ function Product({product,add,openProduct,products,onBack}) {
   const effectiveCustomize = attributes.forceCustomize || customize;
   const hasRequiredName = attributes.forceCustomize && attributes.name;
   const scrubProduct = isScrubProduct(product);
+  const scrubDesignProduct = productKind(product) === "scrubs";
   useEffect(()=>{
     const nextAttributes = productAttributes(product);
     const nextColors = nextAttributes.colorNames?.length ? product.colors.filter(color=>nextAttributes.colorNames.some(name=>normalizeText(name)===normalizeText(color))) : product.colors;
@@ -664,9 +691,9 @@ function Product({product,add,openProduct,products,onBack}) {
     setColor((nextColors.length ? nextColors : product.colors)[0] || "");
     setSize((nextSizes.length ? nextSizes : product.sizes)[0] || "");
     setGender(product.gender === "Unisex" ? "Men" : product.gender);
-    setQty(1); setDesign(product.images?.[0]?.url||product.image); setCustomize(false);
+    setQty(1); setDesign(product.images?.[0]?.url||product.image); setScrubDesign(scrubDesignOptions[0]); setCustomize(false);
     setNameEngraving(Boolean(nextAttributes.forceCustomize && nextAttributes.name));
-    setLogoEngraving(false); setEngravingName(""); setLogo(null); setCustomSizing(false); setAddons([]); setZoomOpen(false);
+    setLogoEngraving(false); setEngravingName(""); setLogo(null); setCustomSizing(false); setAddons([]); setGalleryZoom({active:false,x:50,y:50});
   },[product]);
   const customization = effectiveCustomize ? {
     gender:attributes.gender ? gender : null,
@@ -676,9 +703,16 @@ function Product({product,add,openProduct,products,onBack}) {
     measurements:attributes.measurements && customSizing ? measurements : {},
     trouser_style:attributes.trouser ? trouserStyle : null,
     addons:scrubProduct ? addons : [],
-    design:colourBased ? design : null
-  } : {gender:attributes.gender ? gender : null,addons:scrubProduct ? addons : [],design:colourBased ? design : null};
-  const customFee = measurementFee + engravingFee(customization);
+    design:scrubDesignProduct ? scrubDesign : colourBased ? {title:"Selected design",url:design} : null
+  } : {gender:attributes.gender ? gender : null,addons:scrubProduct ? addons : [],design:scrubDesignProduct ? scrubDesign : colourBased ? {title:"Selected design",url:design} : null};
+  const addonsFee = addonFee(customization);
+  const customFee = measurementFee + engravingFee(customization) + addonsFee;
+  const moveGalleryZoom = event => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = Math.max(0,Math.min(100,((event.clientX - rect.left) / rect.width) * 100));
+    const y = Math.max(0,Math.min(100,((event.clientY - rect.top) / rect.height) * 100));
+    setGalleryZoom({active:true,x,y});
+  };
   const uploadLogo = async event => {
     const file=event.target.files?.[0]; if(!file)return;
     setLogoUploading(true);
@@ -708,13 +742,14 @@ function Product({product,add,openProduct,products,onBack}) {
   return <main className="product-page">
     <button className="back" onClick={onBack}><ArrowLeft size={16}/> Back to home</button>
     <div className="product-layout">
-      <div className="product-gallery-wrap"><button className="gallery zoomable-gallery" onClick={()=>setZoomOpen(true)} aria-label="Zoom product picture"><img src={design||product.image} alt={product.name}/><span className="zoom-hint">Click to zoom</span><div className="gallery-count">{String(Math.max(1,galleryImages.findIndex(item=>item.url===design)+1)).padStart(2,"0")} / {String(galleryImages.length).padStart(2,"0")}</div></button>{galleryImages.length>1&&<div className="design-gallery" aria-label={colourBased?"Choose a design":"Product gallery"}>{galleryImages.slice(0,8).map((image,index)=><button className={design===image.url?"selected":""} key={image.id} onClick={()=>setDesign(image.url)}><img src={image.url} alt={`${product.name} view ${index+1}`}/><span>{index+1}</span></button>)}</div>}</div>
+      <div className="product-gallery-wrap"><div className={galleryZoom.active?"gallery zoomable-gallery is-zooming":"gallery zoomable-gallery"} onPointerEnter={moveGalleryZoom} onPointerMove={moveGalleryZoom} onPointerDown={moveGalleryZoom} onPointerUp={()=>setGalleryZoom(current=>({...current,active:false}))} onPointerCancel={()=>setGalleryZoom(current=>({...current,active:false}))} onPointerLeave={()=>setGalleryZoom(current=>({...current,active:false}))} style={{"--zoom-x":`${galleryZoom.x}%`,"--zoom-y":`${galleryZoom.y}%`}} aria-label="Move over product picture to zoom"><img src={design||product.image} alt={product.name}/><span className="zoom-hint">Hover or drag to zoom</span><div className="gallery-count">{String(Math.max(1,galleryImages.findIndex(item=>item.url===design)+1)).padStart(2,"0")} / {String(galleryImages.length).padStart(2,"0")}</div></div>{galleryImages.length>1&&<div className="design-gallery" aria-label={colourBased?"Choose a design":"Product gallery"}>{galleryImages.slice(0,8).map((image,index)=><button className={design===image.url?"selected":""} key={image.id} onClick={()=>setDesign(image.url)}><img src={image.url} alt={`${product.name} view ${index+1}`}/><span>{index+1}</span></button>)}</div>}</div>
       <div className="product-info">
         <p className="eyebrow">{product.category} · {product.gender === "Unisex" ? "Men & Women" : product.gender}</p><h1>{product.name}</h1><p className={product.isOnSale?"price sale-price":"price"}>{product.isOnSale&&<del>{pkr(product.regularPrice)}</del>}{pkr(product.price)}</p>
         <p className="description">Polished enough for rounds, comfortable enough for the longest shift. Crafted in our signature {product.fabric.toLowerCase()} fabric with a clean, easy fit and thoughtfully placed utility.</p>
         {attributes.gender&&<div className="selector"><div><b>Gender</b><span>{gender}</span></div><div className="size-options">{genderOptions.map(option=><button key={option} className={gender===option?"selected":""} onClick={()=>setGender(option)}>{option}</button>)}</div></div>}
         {attributes.color&&!colourBased&&<div className="selector"><div><b>Colour</b><span>{color}</span></div><div className="color-options">{allowedColors.map(c=><button key={c} className={color===c?"selected":""} onClick={()=>setColor(c)} style={{"--swatch":product.variants.find(variant=>variant.colors?.name===c)?.colors?.hex||palette[c]||"#888"}} aria-label={c}/>)}</div></div>}
         {attributes.size&&<div className="selector"><div><b>Size</b><button className="underlined" onClick={()=>setSizeChart(true)}>Size chart</button></div><div className="size-options">{allowedSizes.map(s=><button key={s} className={size===s?"selected":""} onClick={()=>setSize(s)}>{s}</button>)}</div></div>}
+        {scrubDesignProduct&&<div className="selector design-selector"><div><b>Design</b><span>{scrubDesign.title}</span></div><div className="scrub-design-grid">{scrubDesignOptions.map(option=><button key={option.title} className={scrubDesign.title===option.title?"selected":""} onClick={()=>setScrubDesign(option)}><img src={option.url} alt={`${option.title} scrub design`}/><span>{option.title}</span></button>)}</div></div>}
         {hasCustomization&&<section className="customization-panel"><div className="customization-head"><div><b>{attributes.forceCustomize?"Customize this item":"Customize this item"}</b><span>{attributes.label}</span></div>{!attributes.forceCustomize&&<div className="yes-no"><button className={!customize?"selected":""} onClick={()=>setCustomize(false)}>No</button><button className={customize?"selected":""} onClick={()=>setCustomize(true)}>Yes</button></div>}</div>{effectiveCustomize&&<div className="customization-fields">
           {attributes.sleeve&&<OptionButtons label="Sleeve" options={["Half","Quarter","Full"]} value={sleeve} setValue={setSleeve}/>}
           {attributes.name&&<ToggleField label="Name engraving (+Rs 200)" enabled={attributes.forceCustomize || nameEngraving} setEnabled={attributes.forceCustomize ? ()=>{} : setNameEngraving} locked={attributes.forceCustomize}>{(attributes.forceCustomize||nameEngraving)&&<input maxLength="12" value={engravingName} onChange={event=>setEngravingName(event.target.value)} placeholder="Name, up to 12 letters" required={hasRequiredName}/>}</ToggleField>}
@@ -722,7 +757,7 @@ function Product({product,add,openProduct,products,onBack}) {
           {attributes.measurements&&<ToggleField label="Size customization" enabled={customSizing} setEnabled={setCustomSizing}>{customSizing&&<div className="measurements-grid">{Object.entries(measurements).map(([key,value])=><label key={key}>{key.replaceAll("_"," ")}<input type="number" min="0" step=".1" value={value} onChange={event=>setMeasurements(current=>({...current,[key]:event.target.value}))} placeholder="inches"/></label>)}<p><Ruler size={14}/> Rs 100 per completed measurement · {pkr(measurementFee)}</p></div>}</ToggleField>}
           {attributes.trouser&&<OptionButtons label="Trouser style" options={["Straight","Bottom/Cargo"]} value={trouserStyle} setValue={setTrouserStyle}/>}
         </div>}</section>}
-        {scrubProduct&&<section className="product-addons"><b>Add with this order</b>{[["sleeves","Sleeves"],["scrub_cap","Scrub cap"],["inner","Inner"]].map(([value,label])=><label key={value}><input type="checkbox" checked={addons.includes(value)} onChange={()=>setAddons(current=>current.includes(value)?current.filter(item=>item!==value):[...current,value])}/>{label}</label>)}</section>}
+        {scrubProduct&&<section className="product-addons"><div><b>Add with this order</b><span>{addons.length ? `Add-ons total: ${pkr(addonsFee)}` : "Optional add-ons"}</span></div>{addonOptions.map(option=><label key={option.value}><input type="checkbox" checked={addons.includes(option.value)} onChange={()=>setAddons(current=>current.includes(option.value)?current.filter(item=>item!==option.value):[...current,option.value])}/><span>{option.label}</span><strong>+{pkr(option.price)}</strong></label>)}</section>}
         <div className="buy-row"><div className="quantity"><button onClick={()=>setQty(Math.max(1,qty-1))}><Minus size={15}/></button>{qty}<button onClick={()=>setQty(qty+1)}><Plus size={15}/></button></div><button className="primary" disabled={(effectiveCustomize&&logoEngraving&&!logo)||(hasRequiredName&&!engravingName.trim())} onClick={()=>Array.from({length:qty}).forEach(()=>add(product,size,color,customization))}>Add to bag — {pkr((product.price+customFee)*qty)}</button><button className="wish" aria-label="Save product"><Heart/></button><button className="wish share-product" aria-label="Share product" onClick={shareProduct}><Share2/></button></div>
         {shareStatus&&<p className="share-status">{shareStatus}</p>}
         <p className="stock"><i/> In stock — ready to ship</p>
@@ -730,7 +765,6 @@ function Product({product,add,openProduct,products,onBack}) {
       </div>
     </div>
     <ProductRow title="Complete the rotation." label="YOU MAY ALSO LIKE" list={products.filter(p=>p.id!==product.id).slice(0,4)} {...{openProduct,add}} goShop={()=>{}}/>
-    {zoomOpen&&<div className="image-zoom-modal" onClick={()=>setZoomOpen(false)}><button className="modal-close" onClick={()=>setZoomOpen(false)}><X/></button><img src={design||product.image} alt={product.name}/></div>}
     {sizeChart&&<div className="modal-backdrop" onClick={()=>setSizeChart(false)}><section className="size-chart-modal" onClick={event=>event.stopPropagation()}><button className="modal-close" onClick={()=>setSizeChart(false)}><X/></button><p className="eyebrow">MEDZ APPAREL SIZE GUIDE</p><h2>Find your fit.</h2><table><thead><tr><th>Size</th><th>Chest</th><th>Waist</th><th>Hip</th></tr></thead><tbody>{[["XS","32–34","26–28","34–36"],["S","34–36","28–30","36–38"],["M","38–40","32–34","40–42"],["L","42–44","36–38","44–46"],["XL","46–48","40–42","48–50"],["2XL","50–52","44–46","52–54"]].map(row=><tr key={row[0]}>{row.map(cell=><td key={cell}>{cell}</td>)}</tr>)}</tbody></table><small>Measurements are in inches. For a custom fit, complete only the measurements you need.</small></section></div>}
   </main>;
 }
