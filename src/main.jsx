@@ -78,6 +78,14 @@ const addonLabels = Object.fromEntries(addonOptions.map(option=>[option.value,op
 const addonPrices = Object.fromEntries(addonOptions.map(option=>[option.value,option.price]));
 const addonFee = customization => (customization?.addons || []).reduce((sum,item)=>sum+(addonPrices[item]||0),0);
 const itemImage = item => item?.customization?.design?.url || item?.image || "";
+const isOuterwearCategory = name => normalizeText(name).includes("outerwear") || normalizeText(name).includes("jacket");
+const visibleCategoryList = (categories = []) => {
+  const filtered = categories.filter(category=>!isOuterwearCategory(category.name));
+  if (!filtered.some(category=>normalizeText(category.name).includes("accessor"))) {
+    filtered.push({id:"accessories-fallback",name:"Accessories",sort_order:90});
+  }
+  return filtered;
+};
 const scrubDesignOptions = [
   { title:"Classic", url:"/media/scrub-designs/01-classic.jpg" },
   { title:"Double Gear", url:"/media/scrub-designs/02-double-gear.jpg" },
@@ -88,6 +96,11 @@ const scrubDesignOptions = [
   { title:"Mandarin Classic", url:"/media/scrub-designs/07-mandarin-classic.jpg" },
   { title:"Mandarin Zipper", url:"/media/scrub-designs/08-mandarin-zipper.jpg" }
 ];
+const productInfoSections = {
+  "Details & fit":"Tailored for long shifts with practical pockets, clean lines, and a comfortable medical-uniform fit. Select your size, colour, sleeve, trouser style, and customization before adding to bag.",
+  "Fabric & care":"Wash gently in cold water with similar colours. Avoid bleach. Tumble dry low or line dry to preserve fabric finish and embroidery.",
+  "Shipping & returns":"Cash on delivery is available across Pakistan. Standard delivery is 8–12 working days. Customized orders may require additional confirmation before dispatch."
+};
 const variantForSelection = (product, size, color, attributes = productAttributes(product)) => {
   const variants = product.variants || [];
   return variants.find(variant =>
@@ -101,6 +114,9 @@ const describeCustomization = custom => [
   custom?.size,
   custom?.sleeve && `${custom.sleeve} sleeve`,
   custom?.trouser_style,
+  custom?.name_engraving ? `Name: ${custom.name_engraving}` : null,
+  custom?.logo_engraving?.url ? "Logo uploaded" : null,
+  Object.values(custom?.measurements || {}).some(value=>String(value).trim()) ? `Measurements: ${Object.entries(custom.measurements).filter(([,value])=>String(value).trim()).map(([key,value])=>`${key.replaceAll("_"," ")} ${value}″`).join(", ")}` : null,
   custom?.addons?.length ? `Add-ons: ${custom.addons.map(item=>addonLabels[item]||item).join(", ")}` : null,
   custom?.design?.title ? `Design: ${custom.design.title}` : custom?.design && "Selected design"
 ].filter(Boolean).join(" · ");
@@ -210,7 +226,6 @@ const categoryTaglines = {
   Scrubs:"Built for every move",
   "Scrub Upper":"The essential top",
   "Lab Coats":"Precision, refined",
-  Outerwear:"Your extra layer",
   Accessories:"Shift essentials"
 };
 
@@ -456,7 +471,7 @@ function Header({dark,setDark,page,setPage,goShop,cart,setCartOpen,menuOpen,setM
       </div>
       <div className={`nav-group ${openNavGroup === "categories" ? "open" : ""}`}>
         <button className="nav-group-trigger" aria-expanded={openNavGroup === "categories"} aria-controls="categories-submenu" onClick={() => setOpenNavGroup(current => current === "categories" ? "" : "categories")}>Categories <ChevronDown size={14}/></button>
-        <div className="nav-group-menu" id="categories-submenu">{categories.filter(item=>["Scrub Upper","Lab Coats","Accessories"].includes(item.name)).map(item=><button key={item.id} onClick={()=>selectShopCategory(item.name)}>{item.name}</button>)}</div>
+        <div className="nav-group-menu" id="categories-submenu">{visibleCategoryList(categories).filter(item=>["Scrub Upper","Lab Coats","Accessories"].includes(item.name)).map(item=><button key={item.id} onClick={()=>selectShopCategory(item.name)}>{item.name}</button>)}</div>
       </div>
       <button onClick={() => selectShopCategory("Sale")}>Sale</button>
       <button onClick={() => {setPage("auth");closeNavigation()}}>Order tracking</button>
@@ -504,7 +519,7 @@ function Home({goShop,openProduct,add,products=[],catalogLoading,categories=[],r
     if (name.includes("scrub upper")) return -10;
     return Number(category.sort_order || 0);
   };
-  const visibleCategories = [...(categories.length ? categories : [...new Set(products.map(product=>product.category))].map((name,index)=>({id:name,name,sort_order:index})))]
+  const visibleCategories = visibleCategoryList([...(categories.length ? categories : [...new Set(products.map(product=>product.category))].map((name,index)=>({id:name,name,sort_order:index})))])
     .sort((a,b)=>categoryPriority(a)-categoryPriority(b));
   const categoryImage = category =>
     category.image_url || products.find(product =>
@@ -616,7 +631,7 @@ function ProductCard({p,openProduct,add}) {
 }
 
 function Shop({initialQuery,openProduct,add,products=[],categories=[],loading,error}) {
-  const categoryOptions = ["All",...categories.map(item=>item.name)];
+  const categoryOptions = ["All",...visibleCategoryList(categories).map(item=>item.name)];
   const requestedColour = initialQuery?.startsWith("colour:") ? initialQuery.slice(7) : "All";
   const normalizedInitial = initialQuery === "Sale" || categoryOptions.includes(initialQuery) ? initialQuery : "All";
   const [category,setCategory] = useState(normalizedInitial);
@@ -694,6 +709,7 @@ function Product({product,add,openProduct,products,onBack}) {
   const [shareStatus,setShareStatus] = useState("");
   const [galleryZoom,setGalleryZoom] = useState({active:false,x:50,y:50});
   const [addons,setAddons] = useState([]);
+  const [openInfo,setOpenInfo] = useState("");
   const galleryImages = product.images?.length ? product.images : [{id:"primary",url:product.image}];
   const colourBased = product.productMode === "colour" && attributes.design !== false;
   const measurementFee = customize&&customSizing ? Object.values(measurements).filter(value=>String(value).trim()).length*100 : 0;
@@ -701,7 +717,7 @@ function Product({product,add,openProduct,products,onBack}) {
   const effectiveCustomize = attributes.forceCustomize || customize;
   const hasRequiredName = attributes.forceCustomize && attributes.name;
   const scrubProduct = isScrubProduct(product);
-  const scrubDesignProduct = productKind(product) === "scrubs";
+  const scrubDesignProduct = productKind(product) === "scrubs" && colourBased;
   useEffect(()=>{
     const nextAttributes = productAttributes(product);
     const nextColors = nextAttributes.colorNames?.length ? product.colors.filter(color=>nextAttributes.colorNames.some(name=>normalizeText(name)===normalizeText(color))) : product.colors;
@@ -711,7 +727,7 @@ function Product({product,add,openProduct,products,onBack}) {
     setGender(product.gender === "Unisex" ? "Men" : product.gender);
     setQty(1); setDesign(product.images?.[0]?.url||product.image); setScrubDesign(scrubDesignOptions[0]); setCustomize(false);
     setNameEngraving(Boolean(nextAttributes.forceCustomize && nextAttributes.name));
-    setLogoEngraving(false); setEngravingName(""); setLogo(null); setCustomSizing(false); setAddons([]); setGalleryZoom({active:false,x:50,y:50});
+    setLogoEngraving(false); setEngravingName(""); setLogo(null); setCustomSizing(false); setAddons([]); setOpenInfo(""); setGalleryZoom({active:false,x:50,y:50});
   },[product]);
   const customization = effectiveCustomize ? {
     gender:attributes.gender ? gender : null,
@@ -779,11 +795,11 @@ function Product({product,add,openProduct,products,onBack}) {
         <div className="buy-row"><div className="quantity"><button onClick={()=>setQty(Math.max(1,qty-1))}><Minus size={15}/></button>{qty}<button onClick={()=>setQty(qty+1)}><Plus size={15}/></button></div><button className="primary" disabled={(effectiveCustomize&&logoEngraving&&!logo)||(hasRequiredName&&!engravingName.trim())} onClick={()=>Array.from({length:qty}).forEach(()=>add(product,size,color,customization))}>Add to bag — {pkr((product.price+customFee)*qty)}</button><button className="wish" aria-label="Save product"><Heart/></button><button className="wish share-product" aria-label="Share product" onClick={shareProduct}><Share2/></button></div>
         {shareStatus&&<p className="share-status">{shareStatus}</p>}
         <p className="stock"><i/> In stock — ready to ship</p>
-        {["Details & fit","Fabric & care","Shipping & returns"].map(x=><button className="accordion" key={x}>{x}<Plus size={18}/></button>)}
+        {Object.entries(productInfoSections).map(([title,copy])=><div className={openInfo===title?"accordion-panel open":"accordion-panel"} key={title}><button className="accordion" onClick={()=>setOpenInfo(current=>current===title?"":title)}>{title}{openInfo===title?<Minus size={18}/>:<Plus size={18}/>}</button>{openInfo===title&&<p>{copy}</p>}</div>)}
       </div>
     </div>
     <ProductRow title="Complete the rotation." label="YOU MAY ALSO LIKE" list={products.filter(p=>p.id!==product.id).slice(0,4)} {...{openProduct,add}} goShop={()=>{}}/>
-    {sizeChart&&<div className="modal-backdrop" onClick={()=>setSizeChart(false)}><section className="size-chart-modal" onClick={event=>event.stopPropagation()}><button className="modal-close" onClick={()=>setSizeChart(false)}><X/></button><p className="eyebrow">MEDZ APPAREL SIZE GUIDE</p><h2>Find your fit.</h2><table><thead><tr><th>Size</th><th>Chest</th><th>Waist</th><th>Hip</th></tr></thead><tbody>{[["XS","32–34","26–28","34–36"],["S","34–36","28–30","36–38"],["M","38–40","32–34","40–42"],["L","42–44","36–38","44–46"],["XL","46–48","40–42","48–50"],["2XL","50–52","44–46","52–54"]].map(row=><tr key={row[0]}>{row.map(cell=><td key={cell}>{cell}</td>)}</tr>)}</tbody></table><small>Measurements are in inches. For a custom fit, complete only the measurements you need.</small></section></div>}
+    {sizeChart&&<div className="modal-backdrop size-chart-backdrop" onClick={()=>setSizeChart(false)}><section className="size-chart-modal uploaded-size-chart" onClick={event=>event.stopPropagation()}><button className="modal-close" onClick={()=>setSizeChart(false)}><X/></button><img src="/media/medz-size-chart.jpg" alt="Medz Apparel size chart"/></section></div>}
   </main>;
 }
 
@@ -840,13 +856,7 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
     if (!address.complete_address.trim()) missing.push("complete address");
     return missing;
   };
-  const review=e=>{
-    e.preventDefault();setError("");
-    const missing = missingAddressFields();
-    if (missing.length) return setError(`Please complete the missing field${missing.length>1?"s":""}: ${missing.join(", ")}.`);
-    setStep("review");
-  };
-  const confirm=async()=>{
+  const placeOrder=async()=>{
     const chime=prepareOrderChime();
     setPlacing(true);setError("");
     try{
@@ -866,14 +876,23 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
       setOrder(result);setCart([]);setStep("success");chime.play();
     }catch(e){chime.dispose();setError(e.message)}finally{setPlacing(false)}
   };
-  if(!user)return <main className="auth-page"><section className="account-card"><ShoppingBag/><p className="eyebrow">CHECKOUT</p><h1>Sign in to continue.</h1><p>Your account keeps your delivery details and order history secure.</p><button className="primary" onClick={onLogin}>Sign in</button></section></main>;
+  const review=async e=>{
+    e.preventDefault();setError("");
+    const missing = missingAddressFields();
+    if (missing.length) return setError(`Please complete the missing field${missing.length>1?"s":""}: ${missing.join(", ")}.`);
+    await placeOrder();
+  };
+  useEffect(()=>{
+    if(!user) onLogin();
+  },[user]);
+  if(!user)return null;
   if(!cart.length&&step!=="success")return <main className="auth-page"><section className="account-card"><ShoppingBag/><p className="eyebrow">YOUR BAG</p><h1>Your bag is empty.</h1><button className="primary" onClick={onShop}>Browse the collection</button></section></main>;
   if(step==="success")return <main className="checkout-page success-page"><div className="success-modal-backdrop"><section className="order-success order-success-modal" role="dialog" aria-modal="true" aria-labelledby="order-success-title">
     <div className="success-confetti" aria-hidden="true">{Array.from({length:14},(_,index)=><i key={index} style={{"--x":`${7+(index*7)%90}%`,"--delay":`${(index%7)*.08}s`,"--spin":`${index%2?180:-180}deg`}}/>)}</div>
     <span className="success-check"><Check/></span><p className="eyebrow">ORDER RECEIVED</p><h1 id="order-success-title">Thank you for your order.</h1><p>Your cash-on-delivery order has been placed. We’ll contact you before dispatch.</p><div><span>Order reference</span><b>#{order?.order_id?.slice(0,8).toUpperCase()}</b></div><div><span>Total payable</span><b>{pkr(order?.order_total)}</b></div><button className="primary" onClick={onShop}>Continue shopping <ArrowRight size={16}/></button>
   </section></div></main>;
   return <main className="checkout-page">
-    <div className="checkout-title"><p className="eyebrow">SECURE CHECKOUT</p><h1>{step==="details"?"Delivery details":"Review your order"}</h1><div className="checkout-steps"><span className="active">1 Delivery</span><i/><span className={step==="review"?"active":""}>2 Review</span><i/><span>3 Confirmation</span></div></div>
+    <div className="checkout-title"><p className="eyebrow">SECURE CHECKOUT</p><h1>Delivery details</h1><div className="checkout-steps"><span className="active">1 Delivery address</span><i/><span>2 Thank you page</span></div></div>
     <div className="checkout-layout">
       <section className="checkout-main">
         {step==="details"?<form className="checkout-form" onSubmit={review} noValidate>
@@ -889,15 +908,15 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
           <label className="save-address-option"><input type="checkbox" checked={saveDetails} onChange={event=>setSaveDetails(event.target.checked)}/><span><b>Save these delivery details</b><small>Securely prefill this address the next time you check out.</small></span></label>
           <div className="payment-title"><h2>Payment method</h2></div>
           <div className="payment-options"><button type="button" className="payment-option disabled" disabled><CreditCard/><span><b>Bank cards</b><small>Coming soon</small></span></button><button type="button" className="payment-option selected"><Banknote/><span><b>Cash on delivery</b><small>Pay when your order arrives</small></span><Check/></button></div>
-          <button className="primary checkout-next">Review order <ArrowRight size={17}/></button>{error&&<div className="auth-error checkout-form-error">{error}</div>}
+          <button className="primary checkout-next" disabled={placing}>{placing?"Placing order…":"Place cash on delivery order"} <ArrowRight size={17}/></button>{error&&<div className="auth-error checkout-form-error">{error}</div>}
         </form>:<div className="review">
           <div className="review-block"><div className="review-head"><h2>Delivery address</h2><button onClick={()=>setStep("details")}>Edit</button></div><b>{address.recipient_name}</b><p>{address.complete_address}<br/>{address.city}, Pakistan<br/>{address.mobile}{address.secondary_mobile&&` · ${address.secondary_mobile}`}</p>{saveDetails&&<small className="save-address-note"><Check size={13}/> These details will be saved to your account.</small>}</div>
           <div className="review-block"><h2>Payment</h2><p><Banknote size={17}/> Cash on delivery</p></div>
           <div className="review-block"><h2>Items</h2>{grouped.map(item=>{const details=describeCustomization(item.customization)||"Standard";return <div className="review-item" key={item.groupKey}><img src={itemImage(item)}/><div><b>{item.name}</b><span>{details} · Qty {item.quantity}</span>{item.customization?.name_engraving&&<small>Engraving: {item.customization.name_engraving}</small>}{item.customization?.logo_engraving?.url&&<small>Logo uploaded</small>}</div><strong>{pkr(item.price*item.quantity)}</strong></div>})}</div>
-          <button className="primary confirm-order" disabled={placing} onClick={confirm}>{placing?"Placing order…":"Confirm cash on delivery order"} <ArrowRight size={17}/></button>{error&&<div className="auth-error checkout-form-error">{error}</div>}
+          <button className="primary confirm-order" disabled={placing} onClick={placeOrder}>{placing?"Placing order…":"Confirm cash on delivery order"} <ArrowRight size={17}/></button>{error&&<div className="auth-error checkout-form-error">{error}</div>}
         </div>}
       </section>
-      <aside className="checkout-summary"><h2>Order summary</h2>{grouped.map(item=><div className="summary-item" key={item.groupKey}><span>{item.name} <small>× {item.quantity}</small></span><b>{pkr(item.price*item.quantity)}</b></div>)}<div className="summary-line"><span>Subtotal</span><b>{pkr(subtotal)}</b></div><div className="summary-line"><span>Delivery</span><b>{pkr(delivery)}</b></div><div className="summary-total"><span>Total</span><b>{pkr(total)}</b></div><p>Taxes, if applicable, are included.</p></aside>
+      <aside className="checkout-summary"><h2>Order summary</h2>{grouped.map(item=><div className="summary-item" key={item.groupKey}><span>{item.name} <small>× {item.quantity}</small>{describeCustomization(item.customization)&&<em>{describeCustomization(item.customization)}</em>}</span><b>{pkr(item.price*item.quantity)}</b></div>)}<div className="summary-line"><span>Subtotal</span><b>{pkr(subtotal)}</b></div><div className="summary-line"><span>Delivery</span><b>{pkr(delivery)}</b></div><div className="summary-total"><span>Total</span><b>{pkr(total)}</b></div><p>Taxes, if applicable, are included.</p></aside>
     </div>
   </main>;
 }
@@ -1108,7 +1127,7 @@ function ContactPage() {
 }
 
 function Footer({goShop,onNavigate,categories=[]}) {
-  return <footer><div className="footer-brand"><img className="brand-logo footer-logo" src="/media/medz-logo.png" alt="Medz Apparel"/><h2>MEDZ APPAREL</h2><p>The Doctor&apos;s Thread</p></div><div><h3>Shop</h3>{categories.slice(0,5).map(item=><button key={item.id} onClick={()=>goShop(item.name)}>{item.name}</button>)}</div><div><h3>Help</h3><button onClick={()=>onNavigate("terms")}>Terms & exchanges</button><button onClick={()=>onNavigate("shipping")}>Shipping policy</button><button onClick={()=>onNavigate("privacy")}>Privacy policy</button><button onClick={()=>onNavigate("contact")}>Contact us</button></div><div><h3>Follow</h3><a href="https://www.facebook.com/profile.php?id=100093355088786" target="_blank" rel="noreferrer">Facebook</a><a href="https://www.instagram.com/medz_apparel/" target="_blank" rel="noreferrer">Instagram</a><a href="https://wa.me/message/AMSQ2CXELSP5C1" target="_blank" rel="noreferrer">WhatsApp</a></div><div className="footer-bottom"><span>© 2026 MEDZ APPAREL</span><span><button onClick={()=>onNavigate("privacy")}>Privacy</button> · <button onClick={()=>onNavigate("terms")}>Terms</button> · Accessibility</span></div></footer>;
+  return <footer><div className="footer-brand"><img className="brand-logo footer-logo" src="/media/medz-logo.png" alt="Medz Apparel"/><h2>MEDZ APPAREL</h2><p>The Doctor&apos;s Thread</p></div><div><h3>Shop</h3>{visibleCategoryList(categories).slice(0,5).map(item=><button key={item.id} onClick={()=>goShop(item.name)}>{item.name}</button>)}</div><div><h3>Help</h3><button onClick={()=>onNavigate("terms")}>Terms & exchanges</button><button onClick={()=>onNavigate("shipping")}>Shipping policy</button><button onClick={()=>onNavigate("privacy")}>Privacy policy</button><button onClick={()=>onNavigate("contact")}>Contact us</button></div><div><h3>Follow</h3><a href="https://www.facebook.com/profile.php?id=100093355088786" target="_blank" rel="noreferrer">Facebook</a><a href="https://www.instagram.com/medz_apparel/" target="_blank" rel="noreferrer">Instagram</a><a href="https://wa.me/message/AMSQ2CXELSP5C1" target="_blank" rel="noreferrer">WhatsApp</a></div><div className="footer-bottom"><span>© 2026 MEDZ APPAREL</span><span><button onClick={()=>onNavigate("privacy")}>Privacy</button> · <button onClick={()=>onNavigate("terms")}>Terms</button> · Accessibility</span></div></footer>;
 }
 
 createRoot(document.getElementById("root")).render(<App/>);

@@ -8,6 +8,8 @@ const itemDetails = customization => [
   customization?.gender,
   customization?.color,
   customization?.size,
+  customization?.name_engraving && `Name: ${customization.name_engraving}`,
+  customization?.logo_engraving?.url && "Logo uploaded",
   customization?.design?.title && `Design: ${customization.design.title}`,
   customization?.addons?.length && `Add-ons: ${customization.addons.join(", ")}`
 ].filter(Boolean).join(" · ");

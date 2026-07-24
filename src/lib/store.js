@@ -210,7 +210,7 @@ export async function updateOrderStatus({ orderId, status, customerMessage }) {
 export async function fetchAdminData() {
   if (!supabase) return { categories: [], colors: [], clothTypes: [], orders: [] };
   const [categories, colors, clothTypes, orders] = await Promise.all([
-    supabase.from("categories").select("id,name,slug").order("sort_order"),
+    supabase.from("categories").select("id,name,slug").eq("is_active",true).order("sort_order"),
     supabase.from("colors").select("id,name,hex").order("name"),
     supabase.from("cloth_types").select("id,name").order("name"),
     supabase.from("orders").select("id,status,total_amount,shipping_address,internal_notes,created_at,updated_at,order_items(id,quantity,unit_price,customization,product_variants(size,colors(name),products(name)))").order("created_at",{ascending:false}).limit(10)

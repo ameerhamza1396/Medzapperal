@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { ArrowRight, CalendarDays, Check, KeyRound, LogOut, Mail, MapPin, Package, Phone, RefreshCw, ShieldCheck, Truck, UserRound, XCircle } from "lucide-react";
+import { ArrowRight, CalendarDays, Check, KeyRound, LogOut, Mail, MapPin, Package, Phone, RefreshCw, ShieldCheck, Truck, UserRound } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
-import { cancelPendingOrder, fetchCustomerAccount } from "./lib/store";
+import { fetchCustomerAccount } from "./lib/store";
 
 const pkr = value => new Intl.NumberFormat("en-PK",{style:"currency",currency:"PKR",maximumFractionDigits:0}).format(Number(value)||0);
 const addonLabels = { sleeves:"Black sleeves", scrub_cap:"Matching scrub cap", inner:"Black Inner" };
@@ -11,6 +11,9 @@ const describeOrderDetails = (custom,variant) => [
   custom?.size || variant?.size,
   custom?.sleeve && `${custom.sleeve} sleeve`,
   custom?.trouser_style,
+  custom?.name_engraving ? `Name: ${custom.name_engraving}` : null,
+  custom?.logo_engraving?.url ? "Logo uploaded" : null,
+  Object.values(custom?.measurements || {}).some(value=>String(value).trim()) ? `Measurements: ${Object.entries(custom.measurements).filter(([,value])=>String(value).trim()).map(([key,value])=>`${key.replaceAll("_"," ")} ${value}″`).join(", ")}` : null,
   custom?.addons?.length ? `Add-ons: ${custom.addons.map(item=>addonLabels[item]||item).join(", ")}` : null,
   custom?.design?.title ? `Design: ${custom.design.title}` : custom?.design && "Selected design"
 ].filter(Boolean).join(" · ") || "Standard";
@@ -47,7 +50,6 @@ export function AuthPage({ user, profile, onDone, onSignOut, onAdmin, onContact,
   const [accountData, setAccountData] = useState({ orders: [], addresses: [] });
   const [accountLoading, setAccountLoading] = useState(false);
   const [accountError, setAccountError] = useState("");
-  const [cancelling, setCancelling] = useState("");
 
   const loadAccount = async () => {
     if (!user) return;
@@ -111,13 +113,21 @@ export function AuthPage({ user, profile, onDone, onSignOut, onAdmin, onContact,
     setMessage("A new verification code has been sent.");
   });
 
-  const cancelOrder = async orderId => {
-    if (!window.confirm("Cancel this order? This cannot be undone.")) return;
-    setCancelling(orderId); setAccountError("");
-    try { await cancelPendingOrder(orderId); await loadAccount(); }
-    catch (e) { setAccountError(e.message); }
-    finally { setCancelling(""); }
-  };
+  const signInWithGoogle = () => run(async () => {
+    if (!isSupabaseConfigured) throw new Error("Supabase environment variables are not configured yet.");
+    const redirectTo = `${window.location.origin}/account`;
+    const { error: googleError } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo,
+        queryParams: {
+          access_type: "offline",
+          prompt: "select_account"
+        }
+      }
+    });
+    if (googleError) throw googleError;
+  });
 
   if (user) {
     const joined = new Date(user.created_at).toLocaleDateString("en-PK",{day:"numeric",month:"long",year:"numeric"});
@@ -142,11 +152,7 @@ export function AuthPage({ user, profile, onDone, onSignOut, onAdmin, onContact,
                 const variant=item.product_variants; const product=variant?.products; const image=[...(product?.product_images||[])].sort((a,b)=>a.sort_order-b.sort_order)[0]?.url; const custom=item.customization||{};
                 return <div className="account-order-item" key={item.id}>{image&&<img src={image} alt=""/>}<div><b>{product?.name || "Medz Apparel item"}</b><span>{describeOrderDetails(custom,variant)} · Qty {item.quantity}</span>{custom.name_engraving&&<small>Engraving: {custom.name_engraving}</small>}{custom.logo_engraving?.url&&<small>Logo uploaded</small>}</div><strong>{pkr(Number(item.unit_price)*item.quantity)}</strong></div>;
               })}
-              <div className="order-actions">{order.status === "pending"
-                ? <button className="danger-link" disabled={cancelling===order.id} onClick={()=>cancelOrder(order.id)}>{cancelling===order.id?"Cancelling…":<><XCircle size={15}/> Cancel order</>}</button>
-                : !["cancelled","refunded","delivered"].includes(order.status) && <button onClick={onContact}><Phone size={15}/> Contact us to request cancellation</button>}
-                <span>Last updated {new Date(order.updated_at).toLocaleDateString("en-PK")}</span>
-              </div>
+              <div className="order-actions"><button onClick={onContact}><Phone size={15}/> Contact support</button><span>Last updated {new Date(order.updated_at).toLocaleDateString("en-PK")}</span></div>
             </article>;
           })}</div>
           : <div className="profile-empty"><Package/><h3>No orders yet</h3><p>Your order history will appear here after checkout.</p><button className="primary" onClick={onDone}>Start shopping</button></div>}
@@ -180,6 +186,10 @@ export function AuthPage({ user, profile, onDone, onSignOut, onAdmin, onContact,
         <p className="eyebrow">{mode === "login" ? "WELCOME BACK" : "JOIN MEDZAPPERAL"}</p>
         <h1>{mode === "login" ? "Sign in." : "Create an account."}</h1>
         <p>{mode === "login" ? "Access your orders, addresses, and saved pieces." : "One account for a more considered shopping experience."}</p>
+        <button className="google-signin" onClick={signInWithGoogle} disabled={loading}>
+          <span aria-hidden="true">G</span>{mode === "login" ? "Continue with Google" : "Sign up with Google"}
+        </button>
+        <div className="auth-divider"><span>or use email</span></div>
         <form onSubmit={submit}>
           {mode === "signup" && <label>Full name<input value={name} onChange={e=>setName(e.target.value)} autoComplete="name" required /></label>}
           <label>Email address<div className="input-icon"><Mail size={16}/><input type="email" value={email} onChange={e=>setEmail(e.target.value)} autoComplete="email" required /></div></label>
