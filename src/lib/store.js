@@ -59,7 +59,7 @@ export async function fetchStorefrontContent() {
   if (!supabase) return { categories: [], reviews: [] };
   const [categoryResult, reviewResult] = await Promise.all([
     supabase.from("categories").select("id,name,slug,parent_id,image_url,sort_order,is_active").eq("is_active",true).order("sort_order"),
-    supabase.from("customer_reviews").select("id,title,image_url,sort_order").eq("is_active",true).order("sort_order").limit(12)
+    supabase.from("customer_reviews").select("id,title,image_url,sort_order").eq("is_active",true).order("sort_order").limit(24)
   ]);
   if (categoryResult.error) throw categoryResult.error;
   return {
@@ -208,20 +208,43 @@ export async function updateOrderStatus({ orderId, status, customerMessage }) {
 }
 
 export async function fetchAdminData() {
-  if (!supabase) return { categories: [], colors: [], clothTypes: [], orders: [] };
-  const [categories, colors, clothTypes, orders] = await Promise.all([
+  if (!supabase) return { categories: [], colors: [], clothTypes: [], orders: [], reviews: [] };
+  const [categories, colors, clothTypes, orders, reviews] = await Promise.all([
     supabase.from("categories").select("id,name,slug").eq("is_active",true).order("sort_order"),
     supabase.from("colors").select("id,name,hex").order("name"),
     supabase.from("cloth_types").select("id,name").order("name"),
-    supabase.from("orders").select("id,status,total_amount,shipping_address,internal_notes,created_at,updated_at,order_items(id,quantity,unit_price,customization,product_variants(size,colors(name),products(name)))").order("created_at",{ascending:false}).limit(10)
+    supabase.from("orders").select("id,status,total_amount,shipping_address,internal_notes,created_at,updated_at,order_items(id,quantity,unit_price,customization,product_variants(size,colors(name),products(name)))").order("created_at",{ascending:false}).limit(10),
+    supabase.from("customer_reviews").select("id,title,image_url,image_file_id,sort_order,is_active,created_at").order("sort_order").order("created_at",{ascending:false})
   ]);
-  for (const result of [categories, colors, clothTypes, orders]) if (result.error) throw result.error;
+  for (const result of [categories, colors, clothTypes, orders, reviews]) if (result.error) throw result.error;
   return {
     categories: categories.data,
     colors: colors.data,
     clothTypes: clothTypes.data,
-    orders: orders.data.map(order => ({ ...order, customer_message: order.internal_notes }))
+    orders: orders.data.map(order => ({ ...order, customer_message: order.internal_notes })),
+    reviews: reviews.data || []
   };
+}
+
+export async function saveCustomerReview(review) {
+  if (!supabase) throw new Error("Supabase is not configured.");
+  const row = {
+    title: review.title?.trim() || null,
+    image_url: review.image_url,
+    image_file_id: review.image_file_id || null,
+    sort_order: Number(review.sort_order) || 0,
+    is_active: review.is_active !== false
+  };
+  const result = review.id
+    ? await supabase.from("customer_reviews").update(row).eq("id", review.id)
+    : await supabase.from("customer_reviews").insert(row);
+  if (result.error) throw result.error;
+}
+
+export async function archiveCustomerReview(reviewId) {
+  if (!supabase) throw new Error("Supabase is not configured.");
+  const { error } = await supabase.from("customer_reviews").update({ is_active: false }).eq("id", reviewId);
+  if (error) throw error;
 }
 
 export function slugify(value) {

@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "cloudflare:build": "vite build",
+    "cloudflare:deploy": "pnpm run build && wrangler pages deploy dist"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",

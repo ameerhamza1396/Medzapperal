@@ -9,7 +9,7 @@ import hero from "./assets/medzapperal-hero.png";
 import { AuthPage } from "./Auth";
 import { getMyProfile, isSupabaseConfigured, supabase } from "./lib/supabase";
 import { deleteFromImageKit, uploadCustomerLogo, uploadToImageKit } from "./lib/imagekit";
-import { createProductWithVariants, deleteProduct, fetchAdminData, fetchCatalog, fetchDefaultAddress, fetchStorefrontContent, placeCodOrder, saveDefaultAddress, sendOrderReceivedEmail, slugify, updateOrderStatus, updateProductWithVariants } from "./lib/store";
+import { archiveCustomerReview, createProductWithVariants, deleteProduct, fetchAdminData, fetchCatalog, fetchDefaultAddress, fetchStorefrontContent, placeCodOrder, saveCustomerReview, saveDefaultAddress, sendOrderReceivedEmail, slugify, updateOrderStatus, updateProductWithVariants } from "./lib/store";
 import "./styles.css";
 
 const palette = {
@@ -954,12 +954,87 @@ function AdminOrderEditor({order,onUpdated}) {
   </article>;
 }
 
+function AdminReviewManager({ reviews = [], onUpdated }) {
+  const [title,setTitle] = useState("");
+  const [sortOrder,setSortOrder] = useState("");
+  const [image,setImage] = useState(null);
+  const [editingId,setEditingId] = useState(null);
+  const [saving,setSaving] = useState(false);
+  const [feedback,setFeedback] = useState("");
+  const activeReviews = reviews.filter(review=>review.is_active !== false);
+  const reset = () => { setTitle(""); setSortOrder(""); setImage(null); setEditingId(null); setFeedback(""); };
+  const edit = review => {
+    setEditingId(review.id);
+    setTitle(review.title || "");
+    setSortOrder(String(review.sort_order ?? ""));
+    setImage({ url: review.image_url, fileId: review.image_file_id || "", isExisting:true });
+    setFeedback("");
+  };
+  const uploadReviewImage = async event => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setSaving(true); setFeedback("");
+    try {
+      const uploaded = await uploadToImageKit(file,"/medzapperal/reviews");
+      setImage({ url: uploaded.url, fileId: uploaded.fileId, thumbnailUrl: uploaded.thumbnailUrl });
+    } catch (error) { setFeedback(error.message); }
+    finally { setSaving(false); event.target.value = ""; }
+  };
+  const submit = async event => {
+    event.preventDefault();
+    if (!image?.url) { setFeedback("Upload a review image first."); return; }
+    setSaving(true); setFeedback("");
+    try {
+      await saveCustomerReview({
+        id: editingId,
+        title,
+        image_url: image.url,
+        image_file_id: image.fileId,
+        sort_order: sortOrder || activeReviews.length + 1,
+        is_active: true
+      });
+      setFeedback(editingId ? "Review updated." : "Review published.");
+      reset();
+      await onUpdated();
+    } catch (error) { setFeedback(error.message); }
+    finally { setSaving(false); }
+  };
+  const archive = async review => {
+    if (!window.confirm("Hide this review from the storefront?")) return;
+    setSaving(true); setFeedback("");
+    try {
+      await archiveCustomerReview(review.id);
+      if (review.image_file_id) deleteFromImageKit(review.image_file_id).catch(()=>{});
+      await onUpdated();
+    } catch (error) { setFeedback(error.message); }
+    finally { setSaving(false); }
+  };
+  return <section className="admin-reviews-panel">
+    <div className="panel-head"><div><p className="eyebrow">SOCIAL PROOF</p><h2>Customer reviews</h2></div><span>{activeReviews.length} active</span></div>
+    <form className="review-editor" onSubmit={submit}>
+      <label>Review title <small>Shown under the poster</small><input value={title} onChange={event=>setTitle(event.target.value)} placeholder="e.g. Perfect fit and quality"/></label>
+      <label>Order <small>Lower appears first</small><input type="number" min="0" value={sortOrder} onChange={event=>setSortOrder(event.target.value)} placeholder="1"/></label>
+      <label className="primary upload-button">{saving ? "Working…" : image ? "Replace image" : "Upload review"}<input type="file" accept="image/jpeg,image/png,image/webp,image/avif" disabled={saving} onChange={uploadReviewImage}/></label>
+      <button className="primary" disabled={saving}>{saving ? "Saving…" : editingId ? "Save review" : "Add review"}</button>
+      {editingId && <button type="button" className="review-cancel" onClick={reset}>Cancel edit</button>}
+    </form>
+    {image?.url && <div className="review-preview"><img src={image.thumbnailUrl || image.url} alt="Review preview"/><span>{title || "Review poster preview"}</span></div>}
+    {feedback && <p className={feedback.includes("updated") || feedback.includes("published") ? "admin-order-success" : "admin-order-error"}>{feedback}</p>}
+    {activeReviews.length ? <div className="admin-review-grid">{activeReviews.map(review=><article key={review.id}>
+      <img src={review.image_url} alt={review.title || "Customer review"}/>
+      <div><b>{review.title || "Customer review"}</b><span>Order {review.sort_order}</span></div>
+      <button type="button" onClick={()=>edit(review)}>Edit</button>
+      <button type="button" onClick={()=>archive(review)}><Trash2 size={14}/> Hide</button>
+    </article>)}</div> : <div className="admin-empty">No review posters yet. Upload one above.</div>}
+  </section>;
+}
+
 function Admin({ user, profile, authReady, catalogLoading, onLogin, products, onCreated }) {
   const [uploading,setUploading] = useState(false);
   const [productImages,setProductImages] = useState([]);
   const [removedImageFileIds,setRemovedImageFileIds] = useState([]);
   const [uploadError,setUploadError] = useState("");
-  const [adminData,setAdminData] = useState({categories:[],colors:[],clothTypes:[],orders:[]});
+  const [adminData,setAdminData] = useState({categories:[],colors:[],clothTypes:[],orders:[],reviews:[]});
   const [showForm,setShowForm] = useState(false);
   const [editingId,setEditingId] = useState(null);
   const [saving,setSaving] = useState(false);
@@ -1094,6 +1169,7 @@ function Admin({ user, profile, authReady, catalogLoading, onLogin, products, on
       <div className="editor-actions"><button type="button" onClick={()=>{resetEditor();setShowForm(false)}}>Cancel</button><button className="primary" disabled={saving||uploading}>{saving?"Saving…":editingId?"Save changes":"Publish product"} <ArrowRight size={16}/></button></div>
     </form>}
     <div className="metrics">{metrics.map((m,i)=><div key={m[0]}><span>{i===0?<BarChart3/>:i===1?<ShoppingBag/>:i===2?<Package/>:<Sparkles/>}</span><p>{m[0]}</p>{m[1] == null ? <span className="skeleton skeleton-title small"/> : <h2>{m[1]}</h2>}{m[2] == null ? <span className="skeleton skeleton-line short"/> : <small>{m[2]}</small>}</div>)}</div>
+    <AdminReviewManager reviews={adminData.reviews} onUpdated={async()=>{ await loadAdminData(); await onCreated(); }} />
     <section className="admin-orders-panel"><div className="panel-head"><div><p className="eyebrow">FULFILMENT</p><h2>Manage received orders</h2></div><span>{adminData.orders.length} recent</span></div>{adminData.orders.length?<div className="admin-order-list">{adminData.orders.map(order=><AdminOrderEditor key={order.id} order={order} onUpdated={loadAdminData}/>)}</div>:<div className="admin-empty">No orders yet.</div>}</section>
     <section className="inventory-panel"><div className="panel-head"><h2>Inventory alerts</h2></div>{products.filter(p=>p.stock<10).length?products.filter(p=>p.stock<10).map(p=><div className="stock-row" key={p.id}>{p.image&&<img src={p.image}/>}<div><b>{p.name}</b><span>{p.colors.join(", ")}</span></div><strong>{p.stock} left</strong></div>):<div className="admin-empty">No low-stock products.</div>}</section>
     <section className="admin-products"><div className="panel-head"><h2>Live products</h2><span>{catalogLoading?<span className="skeleton skeleton-line short"/>:`${products.length} total`}</span></div>{catalogLoading?<ProductSkeletons count={4}/>:products.length?<div className="product-table product-actions-table"><div className="table-header"><span>Product</span><span>Category</span><span>Stock</span><span>Price</span><span>Status</span><span>Actions</span></div>{products.map(p=><div key={p.id}><span>{p.image&&<img src={p.image}/>}<b>{p.name}</b></span><span>{p.category}</span><span>{p.stock}</span><span className={p.isOnSale?"sale-price":""}>{p.isOnSale&&<del>{pkr(p.regularPrice)}</del>}{pkr(p.price)}</span><span className="active"><i/> Active</span><span className="row-actions"><button onClick={()=>openEdit(p)}>Edit</button><button onClick={()=>removeProduct(p)}><Trash2 size={14}/> Archive</button></span></div>)}</div>:<div className="admin-empty large">No products yet. Use “Add product” to publish your first item.</div>}</section>
