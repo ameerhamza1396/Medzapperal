@@ -1,3 +1,10 @@
 name = "medzapperal"
 compatibility_date = "2026-07-26"
+main = "functions/worker.js"
 pages_build_output_dir = "./dist"
+
+[assets]
+directory = "./dist"
+binding = "STATIC_ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
