@@ -435,7 +435,10 @@ function App() {
     }
   };
   const goShop = (category = "All") => navigate("shop",{query:category === "All" ? "" : category});
-  const openProduct = p => navigate("product",{product:p});
+  const openProduct = p => {
+    navigate("product",{product:p});
+    requestAnimationFrame(()=>window.scrollTo({top:0,behavior:"smooth"}));
+  };
   const add = (product, size = product.sizes[0], color = product.colors[0], customization = {}) => {
     const attributes = productAttributes(product);
     const variant = variantForSelection(product,size,color,attributes);
@@ -614,9 +617,17 @@ function Home({goShop,openProduct,add,products=[],catalogLoading,categories=[],r
 }
 
 function HeroVideo() {
-  return <video autoPlay muted loop playsInline aria-label="Medz Apparel medical uniforms and outerwear collection">
-    <source src="/media/medz-hero.mp4" type="video/mp4"/>
-  </video>;
+  const [loadVideo,setLoadVideo] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(()=>setLoadVideo(true), 700);
+    return () => window.clearTimeout(timer);
+  }, []);
+  return <div className="hero-video-frame">
+    <img className="hero-video-fallback" src="/media/medz-logo.png" alt="MEDZ APPAREL logo"/>
+    {loadVideo && <video autoPlay muted loop playsInline preload="metadata" poster="/media/medz-logo.png" aria-label="Medz Apparel medical uniforms and outerwear collection">
+      <source src="/media/medz-hero.mp4" type="video/mp4"/>
+    </video>}
+  </div>;
 }
 
 function ProductSkeletons({count=4,carousel=false}) {
@@ -724,6 +735,7 @@ function Filter({title,options,value,set,swatch}) {
 }
 
 function Product({product,add,openProduct,products,onBack}) {
+  useEffect(()=>{window.scrollTo({top:0,behavior:"smooth"})},[product.id]);
   const attributes = productAttributes(product);
   const genderOptions = product.gender === "Unisex" ? ["Men","Women"] : [product.gender];
   const allowedColors = useMemo(() => {
