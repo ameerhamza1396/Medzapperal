@@ -1,5 +1,3 @@
-import { requireUser } from "./_auth.js";
-
 const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, character => ({
   "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
 }[character]));
@@ -14,7 +12,7 @@ const itemDetails = customization => [
   customization?.addons?.length && `Add-ons: ${customization.addons.join(", ")}`
 ].filter(Boolean).join(" · ");
 
-function orderHtml({ user, order, shippingAddress, items, total }) {
+function orderHtml({ user = {}, order, shippingAddress, items, total }) {
   const rows = (items || []).map(item => `<tr>
     <td style="padding:10px 0;border-bottom:1px solid #e6e3dc"><strong>${escapeHtml(item.name)}</strong><br><span style="color:#667">${escapeHtml(itemDetails(item.customization) || "Standard")}</span></td>
     <td style="padding:10px 0;border-bottom:1px solid #e6e3dc;text-align:center">${escapeHtml(item.quantity)}</td>
@@ -42,21 +40,23 @@ function orderHtml({ user, order, shippingAddress, items, total }) {
 export default async function handler(request, response) {
   if (request.method !== "POST") return response.status(405).json({ error: "Method not allowed" });
   try {
-    const { user } = await requireUser(request);
     const apiKey = process.env.RESEND_API_KEY;
     const from = process.env.RESEND_FROM_EMAIL || "MEDZ APPAREL <onboarding@resend.dev>";
     const replyTo = process.env.RESEND_REPLY_TO || "medzapparel7@gmail.com";
     if (!apiKey) throw new Error("Resend is not configured");
     const body = request.body || {};
+    const to = body.shippingAddress?.email;
+    if (!to) return response.status(400).json({ error: "Customer email is required" });
     const email = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         from,
-        to: [user.email],
+        to: [to],
+        bcc: ["medzapparel7@gmail.com"],
         reply_to: replyTo,
         subject: "Your MEDZ APPAREL order has been received",
-        html: orderHtml({ user, ...body })
+        html: orderHtml(body)
       })
     });
     const result = await email.json().catch(() => ({}));

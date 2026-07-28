@@ -127,14 +127,22 @@ export async function placeCodOrder({ shippingAddress, items }) {
 }
 
 export async function sendOrderReceivedEmail({ order, shippingAddress, items, total }) {
-  if (!supabase) return;
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) return;
+  const { data: { session } } = supabase ? await supabase.auth.getSession() : { data: { session: null } };
   await fetch("/api/order-received-email", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+    headers: {
+      "Content-Type": "application/json",
+      ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {})
+    },
     body: JSON.stringify({ order, shippingAddress, items, total })
   });
+}
+
+export async function claimGuestOrdersByEmail(email) {
+  if (!supabase || !email) return 0;
+  const { data, error } = await supabase.rpc("claim_guest_orders_by_email", { p_email: email });
+  if (error) throw error;
+  return data || 0;
 }
 
 export async function fetchDefaultAddress(userId) {
@@ -244,6 +252,32 @@ export async function saveCustomerReview(review) {
 export async function archiveCustomerReview(reviewId) {
   if (!supabase) throw new Error("Supabase is not configured.");
   const { error } = await supabase.from("customer_reviews").update({ is_active: false }).eq("id", reviewId);
+  if (error) throw error;
+}
+
+export async function saveColor(color) {
+  if (!supabase) throw new Error("Supabase is not configured.");
+  const row = {
+    name: color.name.trim(),
+    hex: color.hex.trim(),
+    slug: color.slug?.trim() || slugify(color.name)
+  };
+  const result = color.id
+    ? await supabase.from("colors").update(row).eq("id", color.id)
+    : await supabase.from("colors").insert(row);
+  if (result.error) throw result.error;
+}
+
+export async function archiveColor(colorId) {
+  if (!supabase) throw new Error("Supabase is not configured.");
+  const { data: used, error: usedError } = await supabase
+    .from("product_variants")
+    .select("id")
+    .eq("color_id", colorId)
+    .limit(1);
+  if (usedError) throw usedError;
+  if (used?.length) throw new Error("This colour is used by product variants. Remove it from products before deleting.");
+  const { error } = await supabase.from("colors").delete().eq("id", colorId);
   if (error) throw error;
 }
 

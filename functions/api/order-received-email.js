@@ -1,4 +1,4 @@
-import { errorResponse, json, requireUser } from "./_shared.js";
+import { json } from "./_shared.js";
 
 const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, character => ({
   "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
@@ -14,7 +14,7 @@ const itemDetails = customization => [
   customization?.addons?.length && `Add-ons: ${customization.addons.join(", ")}`
 ].filter(Boolean).join(" · ");
 
-function orderHtml({ user, order, shippingAddress, items, total }) {
+function orderHtml({ user = {}, order, shippingAddress, items, total }) {
   const rows = (items || []).map(item => `<tr>
     <td style="padding:10px 0;border-bottom:1px solid #e6e3dc"><strong>${escapeHtml(item.name)}</strong><br><span style="color:#667">${escapeHtml(itemDetails(item.customization) || "Standard")}</span></td>
     <td style="padding:10px 0;border-bottom:1px solid #e6e3dc;text-align:center">${escapeHtml(item.quantity)}</td>
@@ -41,27 +41,29 @@ function orderHtml({ user, order, shippingAddress, items, total }) {
 
 export async function onRequestPost(context) {
   try {
-    const { user } = await requireUser(context);
     const apiKey = context.env.RESEND_API_KEY;
     const from = context.env.RESEND_FROM_EMAIL || "MEDZ APPAREL <onboarding@resend.dev>";
     const replyTo = context.env.RESEND_REPLY_TO || "medzapparel7@gmail.com";
     if (!apiKey) throw new Error("Resend is not configured");
     const body = await context.request.json().catch(() => ({}));
+    const to = body.shippingAddress?.email;
+    if (!to) return json({ error: "Customer email is required" }, { status: 400 });
     const email = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         from,
-        to: [user.email],
+        to: [to],
+        bcc: ["medzapparel7@gmail.com"],
         reply_to: replyTo,
         subject: "Your MEDZ APPAREL order has been received",
-        html: orderHtml({ user, ...body })
+        html: orderHtml(body)
       })
     });
     const result = await email.json().catch(() => ({}));
     if (!email.ok) return json({ error: result.message || "Resend email failed" }, { status: email.status });
     return json({ ok: true, id: result.id });
   } catch (error) {
-    return errorResponse(error);
+    return json({ error: error.message }, { status: 500 });
   }
 }

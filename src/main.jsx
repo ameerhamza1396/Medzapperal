@@ -9,7 +9,7 @@ import hero from "./assets/medzapperal-hero.png";
 import { AuthPage } from "./Auth";
 import { getMyProfile, isSupabaseConfigured, supabase } from "./lib/supabase";
 import { deleteFromImageKit, uploadCustomerLogo, uploadToImageKit } from "./lib/imagekit";
-import { archiveCustomerReview, createProductWithVariants, deleteProduct, fetchAdminData, fetchCatalog, fetchDefaultAddress, fetchStorefrontContent, placeCodOrder, saveCustomerReview, saveDefaultAddress, sendOrderReceivedEmail, slugify, updateOrderStatus, updateProductWithVariants } from "./lib/store";
+import { archiveColor, archiveCustomerReview, claimGuestOrdersByEmail, createProductWithVariants, deleteProduct, fetchAdminData, fetchCatalog, fetchDefaultAddress, fetchStorefrontContent, placeCodOrder, saveColor, saveCustomerReview, saveDefaultAddress, sendOrderReceivedEmail, slugify, updateOrderStatus, updateProductWithVariants } from "./lib/store";
 import "./styles.css";
 
 const palette = {
@@ -22,6 +22,7 @@ const palette = {
 const pkr = value => new Intl.NumberFormat("en-PK",{style:"currency",currency:"PKR",maximumFractionDigits:0}).format(Number(value)||0);
 const CART_STORAGE_KEY = "medz-cart";
 const CHECKOUT_RETURN_KEY = "medz-return-checkout";
+const ORDER_CLAIM_EMAIL_KEY = "medz-order-claim-email";
 const readStoredCart = () => {
   try {
     const stored = localStorage.getItem(CART_STORAGE_KEY);
@@ -147,6 +148,7 @@ const routeUrl = ({page,query,product}) => {
 };
 const updateSeo = ({page,query,product}) => {
   if (typeof document === "undefined") return;
+  const siteUrl = "https://www.medzapparel.com";
   const title = product?.name ? `${product.name} | MEDZ APPAREL`
     : page === "shop" ? `${query ? query.replace(/^colour:/,"") : "Shop"} | MEDZ APPAREL`
     : page === "colours" ? "Colour Palette | MEDZ APPAREL"
@@ -159,8 +161,10 @@ const updateSeo = ({page,query,product}) => {
     : page === "admin" ? "Admin | MEDZ APPAREL"
     : "MEDZ APPAREL | The Doctor's Thread";
   const description = product?.description || (page === "shop"
-    ? `Shop ${query ? query.replace(/^colour:/,"") : "medical apparel"} from MEDZ APPAREL in Pakistan.`
-    : "Premium medical scrubs, lab coats, trousers and accessories by MEDZ APPAREL Pakistan.");
+    ? `Shop ${query ? query.replace(/^colour:/,"") : "medical apparel"} from MEDZ APPAREL in Pakistan. Cash on delivery available.`
+    : page === "colours" ? "Explore the MEDZ APPAREL colour palette for premium scrubs and medical uniforms in Pakistan."
+    : page === "contact" ? "Contact MEDZ APPAREL for order help, sizing, customisation and delivery support in Pakistan."
+    : "Premium medical scrubs, lab coats, trousers, scrub uppers and accessories by MEDZ APPAREL Pakistan.");
   document.title = title;
   let meta = document.querySelector('meta[name="description"]');
   if (!meta) {
@@ -178,7 +182,7 @@ const updateSeo = ({page,query,product}) => {
     }
     Object.entries(attrs.update).forEach(([key,value])=>node.setAttribute(key,value));
   };
-  const canonicalUrl = `${window.location.origin}${routeUrl({page,query,product})}`;
+  const canonicalUrl = `${siteUrl}${routeUrl({page,query,product})}`;
   let canonical = document.querySelector('link[rel="canonical"]');
   if (!canonical) {
     canonical = document.createElement("link");
@@ -189,7 +193,45 @@ const updateSeo = ({page,query,product}) => {
   ensureMeta('meta[property="og:title"]',{create:{property:"og:title"},update:{content:title}});
   ensureMeta('meta[property="og:description"]',{create:{property:"og:description"},update:{content:description}});
   ensureMeta('meta[property="og:url"]',{create:{property:"og:url"},update:{content:canonicalUrl}});
-  if (product?.image) ensureMeta('meta[property="og:image"]',{create:{property:"og:image"},update:{content:product.image}});
+  ensureMeta('meta[property="og:type"]',{create:{property:"og:type"},update:{content:product ? "product" : "website"}});
+  ensureMeta('meta[property="og:image"]',{create:{property:"og:image"},update:{content:product?.image || `${siteUrl}/media/home-header-scrubs.png`}});
+  ensureMeta('meta[name="twitter:card"]',{create:{name:"twitter:card"},update:{content:"summary_large_image"}});
+  ensureMeta('meta[name="twitter:title"]',{create:{name:"twitter:title"},update:{content:title}});
+  ensureMeta('meta[name="twitter:description"]',{create:{name:"twitter:description"},update:{content:description}});
+  ensureMeta('meta[name="twitter:image"]',{create:{name:"twitter:image"},update:{content:product?.image || `${siteUrl}/media/home-header-scrubs.png`}});
+  let schema = document.getElementById("medz-dynamic-schema");
+  if (!schema) {
+    schema = document.createElement("script");
+    schema.type = "application/ld+json";
+    schema.id = "medz-dynamic-schema";
+    document.head.appendChild(schema);
+  }
+  schema.textContent = JSON.stringify(product ? {
+    "@context":"https://schema.org",
+    "@type":"Product",
+    name: product.name,
+    image: product.images?.map(image=>image.originalUrl || image.url).filter(Boolean).slice(0,6) || [product.image],
+    description,
+    brand: {"@type":"Brand",name:"MEDZ APPAREL"},
+    category: product.category,
+    offers: {
+      "@type":"Offer",
+      priceCurrency:"PKR",
+      price: String(product.price || 0),
+      availability: product.stock > 0 ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+      url: canonicalUrl
+    }
+  } : {
+    "@context":"https://schema.org",
+    "@type":"WebSite",
+    name:"MEDZ APPAREL",
+    url:siteUrl,
+    potentialAction:{
+      "@type":"SearchAction",
+      target:`${siteUrl}/shop?q={search_term_string}`,
+      "query-input":"required name=search_term_string"
+    }
+  });
 };
 
 function prepareOrderChime() {
@@ -360,7 +402,14 @@ function App() {
       if (!active) return;
       setUser(nextUser);
       if (nextUser) {
-        try { setProfile(await getMyProfile(nextUser.id)); }
+        try {
+          const claimEmail = localStorage.getItem(ORDER_CLAIM_EMAIL_KEY) || nextUser.email;
+          if (claimEmail) {
+            await claimGuestOrdersByEmail(claimEmail).catch(()=>{});
+            localStorage.removeItem(ORDER_CLAIM_EMAIL_KEY);
+          }
+          setProfile(await getMyProfile(nextUser.id));
+        }
         catch { setProfile(null); }
       } else setProfile(null);
       setAuthReady(true);
@@ -413,7 +462,7 @@ function App() {
     {page === "product" && !selected && (catalogLoading ? <ProductPageSkeleton/> : <main className="auth-page"><section className="account-card"><Package/><p className="eyebrow">PRODUCT</p><h1>Product not found</h1><button className="primary" onClick={()=>navigate("home")}>Back to home</button></section></main>)}
     {page === "auth" && <AuthPage user={user} profile={profile} onDone={() => {const returnToCheckout=localStorage.getItem(CHECKOUT_RETURN_KEY)==="1";localStorage.removeItem(CHECKOUT_RETURN_KEY);navigate(returnToCheckout?"checkout":"home",{replace:true});}} onAdmin={() => navigate("admin")} onContact={() => navigate("contact")} onCheckout={() => navigate("checkout")} onSignOut={async () => { await supabase?.auth.signOut(); navigate("home"); }}/>}
     {page === "admin" && <Admin user={user} profile={profile} authReady={authReady} catalogLoading={catalogLoading} onLogin={() => navigate("auth")} products={products} onCreated={loadCatalog} />}
-    {page === "checkout" && <Checkout user={user} profile={profile} cart={cart} setCart={setCart} onLogin={()=>{localStorage.setItem(CHECKOUT_RETURN_KEY,"1");navigate("auth")}} onShop={()=>goShop("All")} />}
+    {page === "checkout" && <Checkout user={user} profile={profile} cart={cart} setCart={setCart} onLogin={(returnToCheckout=true)=>{if(returnToCheckout)localStorage.setItem(CHECKOUT_RETURN_KEY,"1");navigate("auth")}} onShop={()=>goShop("All")} />}
     {["terms","shipping","privacy"].includes(page) && <PolicyPage policy={policyContent[page]} />}
     {page === "contact" && <ContactPage />}
     {page !== "home" && <Reviews reviews={reviews}/>}
@@ -823,10 +872,11 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
   const [placing,setPlacing]=useState(false);
   const [error,setError]=useState("");
   const [order,setOrder]=useState(null);
-  const [saveDetails,setSaveDetails]=useState(false);
+  const [saveDetails,setSaveDetails]=useState(Boolean(user));
   const [savedAddressId,setSavedAddressId]=useState(null);
-  const [address,setAddress]=useState({country:"Pakistan",city:"",recipient_name:profile?.full_name||user?.user_metadata?.full_name||"",complete_address:"",mobile:profile?.phone||"",secondary_mobile:""});
+  const [address,setAddress]=useState({country:"Pakistan",email:user?.email||"",city:"",recipient_name:profile?.full_name||user?.user_metadata?.full_name||"",complete_address:"",mobile:profile?.phone||"",secondary_mobile:""});
   useEffect(()=>{if(!address.recipient_name&&(profile?.full_name||user?.user_metadata?.full_name))setAddress(a=>({...a,recipient_name:profile?.full_name||user?.user_metadata?.full_name}))},[profile,user]);
+  useEffect(()=>{if(user?.email&&!address.email)setAddress(a=>({...a,email:user.email}))},[user?.email]);
   useEffect(()=>{
     if(!user?.id)return;
     let active=true;
@@ -835,6 +885,7 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
       setSavedAddressId(saved.id);
       setAddress(current=>({
         country:"Pakistan",
+        email:current.email||saved.email||user.email||"",
         city:current.city||saved.city||"",
         recipient_name:current.recipient_name||saved.recipient_name||"",
         complete_address:current.complete_address||saved.complete_address||"",
@@ -850,17 +901,19 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
   const total=subtotal+delivery;
   const missingAddressFields = () => {
     const missing = [];
+    if (!address.email.trim()) missing.push("email address");
     if (!address.city.trim()) missing.push("city");
     if (!address.recipient_name.trim()) missing.push("recipient name");
     if (!address.mobile.trim()) missing.push("mobile number");
     if (!address.complete_address.trim()) missing.push("complete address");
+    if (address.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address.email.trim())) missing.push("valid email address");
     return missing;
   };
   const placeOrder=async()=>{
     const chime=prepareOrderChime();
     setPlacing(true);setError("");
     try{
-      if(saveDetails)await saveDefaultAddress({userId:user.id,address,addressId:savedAddressId});
+      if(saveDetails&&user?.id)await saveDefaultAddress({userId:user.id,address,addressId:savedAddressId});
       const result=await placeCodOrder({shippingAddress:address,items:grouped});
       sendOrderReceivedEmail({
         order: result,
@@ -873,6 +926,7 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
           customization:item.customization || {}
         }))
       }).catch(()=>{});
+      localStorage.setItem(ORDER_CLAIM_EMAIL_KEY,address.email.trim());
       setOrder(result);setCart([]);setStep("success");chime.play();
     }catch(e){chime.dispose();setError(e.message)}finally{setPlacing(false)}
   };
@@ -882,14 +936,10 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
     if (missing.length) return setError(`Please complete the missing field${missing.length>1?"s":""}: ${missing.join(", ")}.`);
     await placeOrder();
   };
-  useEffect(()=>{
-    if(!user) onLogin();
-  },[user]);
-  if(!user)return null;
   if(!cart.length&&step!=="success")return <main className="auth-page"><section className="account-card"><ShoppingBag/><p className="eyebrow">YOUR BAG</p><h1>Your bag is empty.</h1><button className="primary" onClick={onShop}>Browse the collection</button></section></main>;
   if(step==="success")return <main className="checkout-page success-page"><div className="success-modal-backdrop"><section className="order-success order-success-modal" role="dialog" aria-modal="true" aria-labelledby="order-success-title">
     <div className="success-confetti" aria-hidden="true">{Array.from({length:14},(_,index)=><i key={index} style={{"--x":`${7+(index*7)%90}%`,"--delay":`${(index%7)*.08}s`,"--spin":`${index%2?180:-180}deg`}}/>)}</div>
-    <span className="success-check"><Check/></span><p className="eyebrow">ORDER RECEIVED</p><h1 id="order-success-title">Thank you for your order.</h1><p>Your cash-on-delivery order has been placed. We’ll contact you before dispatch.</p><div><span>Order reference</span><b>#{order?.order_id?.slice(0,8).toUpperCase()}</b></div><div><span>Total payable</span><b>{pkr(order?.order_total)}</b></div><button className="primary" onClick={onShop}>Continue shopping <ArrowRight size={16}/></button>
+    <span className="success-check"><Check/></span><p className="eyebrow">ORDER RECEIVED</p><h1 id="order-success-title">Thank you for your order.</h1><p>Your cash-on-delivery order has been placed. We’ll contact you before dispatch. Sign in with {address.email ? <b>{address.email}</b> : "your email"} to track this order in your account.</p><div><span>Order reference</span><b>#{order?.order_id?.slice(0,8).toUpperCase()}</b></div><div><span>Total payable</span><b>{pkr(order?.order_total)}</b></div><div className="success-actions"><button className="primary" onClick={onShop}>Continue shopping <ArrowRight size={16}/></button>{!user&&<button className="secondary track-order-button" onClick={()=>{localStorage.setItem(ORDER_CLAIM_EMAIL_KEY,address.email.trim());onLogin(false);}}>Sign in to track order <CircleUserRound size={16}/></button>}</div>
   </section></div></main>;
   return <main className="checkout-page">
     <div className="checkout-title"><p className="eyebrow">SECURE CHECKOUT</p><h1>Delivery details</h1><div className="checkout-steps"><span className="active">1 Delivery address</span><i/><span>2 Thank you page</span></div></div>
@@ -900,12 +950,13 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
           <div className="checkout-fields">
             <label>Country<input value="Pakistan" disabled/></label>
             <label>City *<input value={address.city} onChange={e=>setAddress({...address,city:e.target.value})} placeholder="Enter your city" required/></label>
+            <label className="wide">Email address *<input type="email" value={address.email} onChange={e=>setAddress({...address,email:e.target.value})} placeholder="you@example.com" required/></label>
             <label className="wide">Recipient name *<input value={address.recipient_name} onChange={e=>setAddress({...address,recipient_name:e.target.value})} required/></label>
             <label>Mobile number *<input type="tel" value={address.mobile} onChange={e=>setAddress({...address,mobile:e.target.value})} placeholder="03XX XXXXXXX" pattern="(?:\\+92|0)3[0-9]{9}" required/></label>
             <label>Secondary mobile number <small>Optional</small><input type="tel" value={address.secondary_mobile} onChange={e=>setAddress({...address,secondary_mobile:e.target.value})} placeholder="03XX XXXXXXX" pattern="(?:\\+92|0)3[0-9]{9}|^$"/></label>
             <label className="wide">Complete address *<textarea rows="4" value={address.complete_address} onChange={e=>setAddress({...address,complete_address:e.target.value})} placeholder="House or apartment, street, area and nearby landmark" required/></label>
           </div>
-          <label className="save-address-option"><input type="checkbox" checked={saveDetails} onChange={event=>setSaveDetails(event.target.checked)}/><span><b>Save these delivery details</b><small>Securely prefill this address the next time you check out.</small></span></label>
+          {user ? <label className="save-address-option"><input type="checkbox" checked={saveDetails} onChange={event=>setSaveDetails(event.target.checked)}/><span><b>Save these delivery details</b><small>Securely prefill this address the next time you check out.</small></span></label> : <div className="guest-checkout-note"><CircleUserRound size={16}/><span><b>No sign-in needed to place order.</b><small>After confirmation, you can sign in with this email to track it.</small></span></div>}
           <div className="payment-title"><h2>Payment method</h2></div>
           <div className="payment-options"><button type="button" className="payment-option disabled" disabled><CreditCard/><span><b>Bank cards</b><small>Coming soon</small></span></button><button type="button" className="payment-option selected"><Banknote/><span><b>Cash on delivery</b><small>Pay when your order arrives</small></span><Check/></button></div>
           <button className="primary checkout-next" disabled={placing}>{placing?"Placing order…":"Place cash on delivery order"} <ArrowRight size={17}/></button>{error&&<div className="auth-error checkout-form-error">{error}</div>}
@@ -1026,6 +1077,58 @@ function AdminReviewManager({ reviews = [], onUpdated }) {
       <button type="button" onClick={()=>edit(review)}>Edit</button>
       <button type="button" onClick={()=>archive(review)}><Trash2 size={14}/> Hide</button>
     </article>)}</div> : <div className="admin-empty">No review posters yet. Upload one above.</div>}
+  </section>;
+}
+
+function AdminColorManager({ colors = [], onUpdated }) {
+  const [editing,setEditing] = useState(null);
+  const [form,setForm] = useState({name:"",hex:"#000000"});
+  const [saving,setSaving] = useState(false);
+  const [feedback,setFeedback] = useState("");
+  const reset = () => { setEditing(null); setForm({name:"",hex:"#000000"}); setFeedback(""); };
+  const edit = color => {
+    setEditing(color);
+    setForm({name:color.name || "",hex:color.hex || "#000000"});
+    setFeedback("");
+  };
+  const submit = async event => {
+    event.preventDefault();
+    setSaving(true); setFeedback("");
+    try {
+      if (!form.name.trim()) throw new Error("Colour name is required.");
+      if (!/^#[0-9a-f]{6}$/i.test(form.hex.trim())) throw new Error("Use a valid hex colour, like #10264C.");
+      await saveColor({ id: editing?.id, name: form.name, hex: form.hex });
+      setFeedback(editing ? "Colour updated." : "Colour added.");
+      reset();
+      await onUpdated();
+    } catch (error) { setFeedback(error.message); }
+    finally { setSaving(false); }
+  };
+  const remove = async color => {
+    if (!window.confirm(`Delete “${color.name}”? Only unused colours can be deleted.`)) return;
+    setSaving(true); setFeedback("");
+    try {
+      await archiveColor(color.id);
+      await onUpdated();
+    } catch (error) { setFeedback(error.message); }
+    finally { setSaving(false); }
+  };
+  return <section className="admin-colors-panel">
+    <div className="panel-head"><div><p className="eyebrow">CLOUD COLOURS</p><h2>Manage colours</h2></div><span>{colors.length} colours</span></div>
+    <form className="color-editor" onSubmit={submit}>
+      <label>Colour name<input value={form.name} onChange={event=>setForm({...form,name:event.target.value})} placeholder="Navy Blue"/></label>
+      <label>Hex code<input value={form.hex} onChange={event=>setForm({...form,hex:event.target.value})} placeholder="#10264C"/></label>
+      <label>Picker<input type="color" value={/^#[0-9a-f]{6}$/i.test(form.hex)?form.hex:"#000000"} onChange={event=>setForm({...form,hex:event.target.value})}/></label>
+      <button className="primary" disabled={saving}>{saving?"Saving…":editing?"Save colour":"Add colour"}</button>
+      {editing&&<button type="button" className="review-cancel" onClick={reset}>Cancel</button>}
+    </form>
+    {feedback&&<p className={feedback.includes("updated")||feedback.includes("added")?"admin-order-success":"admin-order-error"}>{feedback}</p>}
+    <div className="admin-color-list">{colors.map(color=><article key={color.id}>
+      <i style={{background:color.hex}}/>
+      <div><b>{color.name}</b><span>{color.hex}</span></div>
+      <button type="button" onClick={()=>edit(color)}>Edit</button>
+      <button type="button" onClick={()=>remove(color)}><Trash2 size={14}/> Delete</button>
+    </article>)}</div>
   </section>;
 }
 
@@ -1169,6 +1272,7 @@ function Admin({ user, profile, authReady, catalogLoading, onLogin, products, on
       <div className="editor-actions"><button type="button" onClick={()=>{resetEditor();setShowForm(false)}}>Cancel</button><button className="primary" disabled={saving||uploading}>{saving?"Saving…":editingId?"Save changes":"Publish product"} <ArrowRight size={16}/></button></div>
     </form>}
     <div className="metrics">{metrics.map((m,i)=><div key={m[0]}><span>{i===0?<BarChart3/>:i===1?<ShoppingBag/>:i===2?<Package/>:<Sparkles/>}</span><p>{m[0]}</p>{m[1] == null ? <span className="skeleton skeleton-title small"/> : <h2>{m[1]}</h2>}{m[2] == null ? <span className="skeleton skeleton-line short"/> : <small>{m[2]}</small>}</div>)}</div>
+    <AdminColorManager colors={adminData.colors} onUpdated={loadAdminData} />
     <AdminReviewManager reviews={adminData.reviews} onUpdated={async()=>{ await loadAdminData(); await onCreated(); }} />
     <section className="admin-orders-panel"><div className="panel-head"><div><p className="eyebrow">FULFILMENT</p><h2>Manage received orders</h2></div><span>{adminData.orders.length} recent</span></div>{adminData.orders.length?<div className="admin-order-list">{adminData.orders.map(order=><AdminOrderEditor key={order.id} order={order} onUpdated={loadAdminData}/>)}</div>:<div className="admin-empty">No orders yet.</div>}</section>
     <section className="inventory-panel"><div className="panel-head"><h2>Inventory alerts</h2></div>{products.filter(p=>p.stock<10).length?products.filter(p=>p.stock<10).map(p=><div className="stock-row" key={p.id}>{p.image&&<img src={p.image}/>}<div><b>{p.name}</b><span>{p.colors.join(", ")}</span></div><strong>{p.stock} left</strong></div>):<div className="admin-empty">No low-stock products.</div>}</section>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://www.medzapparel.com/</loc><priority>1.0</priority><changefreq>weekly</changefreq></url>
+  <url><loc>https://www.medzapparel.com/shop</loc><priority>0.9</priority><changefreq>daily</changefreq></url>
+  <url><loc>https://www.medzapparel.com/colours</loc><priority>0.8</priority><changefreq>monthly</changefreq></url>
+  <url><loc>https://www.medzapparel.com/contact</loc><priority>0.7</priority><changefreq>monthly</changefreq></url>
+  <url><loc>https://www.medzapparel.com/terms</loc><priority>0.4</priority><changefreq>yearly</changefreq></url>
+  <url><loc>https://www.medzapparel.com/shipping</loc><priority>0.4</priority><changefreq>yearly</changefreq></url>
+  <url><loc>https://www.medzapparel.com/privacy</loc><priority>0.4</priority><changefreq>yearly</changefreq></url>
+</urlset>

@@ -1,0 +1,16 @@
+{
+  "name": "MEDZ APPAREL",
+  "short_name": "MEDZ",
+  "description": "Premium medical scrubs and healthcare apparel in Pakistan.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f3ed",
+  "theme_color": "#0a665d",
+  "icons": [
+    {
+      "src": "/media/medz-logo.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
