@@ -9,6 +9,7 @@ import hero from "./assets/medzapperal-hero.png";
 import { AuthPage } from "./Auth";
 import { getMyProfile, isSupabaseConfigured, supabase } from "./lib/supabase";
 import { deleteFromImageKit, uploadCustomerLogo, uploadToImageKit } from "./lib/imagekit";
+import { cartMetaPayload, loadMetaPixel, orderMetaPayload, productMetaPayload, trackMetaEvent } from "./lib/metaPixel";
 import { archiveColor, archiveCustomerReview, claimGuestOrdersByEmail, createProductWithVariants, deleteProduct, fetchAdminData, fetchCatalog, fetchDefaultAddress, fetchStorefrontContent, placeCodOrder, saveColor, saveCustomerReview, saveDefaultAddress, sendOrderReceivedEmail, slugify, updateOrderStatus, updateProductWithVariants } from "./lib/store";
 import "./styles.css";
 
@@ -343,6 +344,7 @@ function App() {
   const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
   const [categories,setCategories] = useState([]);
   const [reviews,setReviews] = useState([]);
+  const lastTrackedRoute = useRef("");
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
     localStorage.setItem("mz-theme", dark ? "dark" : "light");
@@ -384,6 +386,16 @@ function App() {
   useEffect(() => {
     updateSeo({page,query,product:page === "product" ? selected : null});
   }, [page,query,selected]);
+  useEffect(() => { loadMetaPixel(); }, []);
+  useEffect(() => {
+    const product = page === "product" ? selected : null;
+    const route = routeUrl({page,query,product});
+    const key = `${page}:${route}:${product?.id || ""}`;
+    if (lastTrackedRoute.current === key) return;
+    lastTrackedRoute.current = key;
+    trackMetaEvent("PageView",{page_path:route,page_title:document.title});
+    if (product) trackMetaEvent("ViewContent",productMetaPayload(product));
+  }, [page,query,selected?.id]);
   const loadCatalog = async () => {
     setCatalogLoading(true); setCatalogError("");
     try {
@@ -451,7 +463,9 @@ function App() {
     const price = basePrice + measurementFee + engravingFee(customization) + addonFee(customization);
     const selectedSize = attributes.size ? variant.size : "";
     const selectedColor = attributes.color ? variant.colors?.name || color : "";
-    setCart(c => [...c, { ...product, price, basePrice, customization:{...customization,size:selectedSize,color:selectedColor}, cartId: `${Date.now()}-${Math.random()}`, size:selectedSize, color:selectedColor, variantId:variant.id }]);
+    const cartItem = { ...product, price, basePrice, customization:{...customization,size:selectedSize,color:selectedColor}, cartId: `${Date.now()}-${Math.random()}`, size:selectedSize, color:selectedColor, variantId:variant.id };
+    setCart(c => [...c, cartItem]);
+    trackMetaEvent("AddToCart",cartMetaPayload([cartItem]));
     setCartOpen(true);
   };
 
@@ -706,6 +720,12 @@ function Shop({initialQuery,openProduct,add,products=[],categories=[],loading,er
     setCategory(initialQuery === "Sale" || categoryOptions.includes(initialQuery) ? initialQuery : "All");
     setColor(initialQuery?.startsWith("colour:") ? initialQuery.slice(7) : "All");
   }, [initialQuery,categories.length]);
+  useEffect(() => {
+    const term = search.trim();
+    if (!term) return;
+    const timer = window.setTimeout(() => trackMetaEvent("Search",{search_string:term}),700);
+    return () => window.clearTimeout(timer);
+  }, [search]);
   let shown = useMemo(() => products.filter(p =>
     (category === "All" || category === "Sale" ? category !== "Sale" || p.isOnSale : p.category === category) &&
     (color === "All" || p.colors.includes(color)) &&
@@ -886,6 +906,7 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
   const [order,setOrder]=useState(null);
   const [saveDetails,setSaveDetails]=useState(Boolean(user));
   const [savedAddressId,setSavedAddressId]=useState(null);
+  const checkoutTracked = useRef(false);
   const [address,setAddress]=useState({country:"Pakistan",email:user?.email||"",city:"",recipient_name:profile?.full_name||user?.user_metadata?.full_name||"",complete_address:"",mobile:profile?.phone||"",secondary_mobile:""});
   useEffect(()=>{if(!address.recipient_name&&(profile?.full_name||user?.user_metadata?.full_name))setAddress(a=>({...a,recipient_name:profile?.full_name||user?.user_metadata?.full_name}))},[profile,user]);
   useEffect(()=>{if(user?.email&&!address.email)setAddress(a=>({...a,email:user.email}))},[user?.email]);
@@ -911,6 +932,11 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
   const subtotal=grouped.reduce((sum,item)=>sum+item.price*item.quantity,0);
   const delivery=200+(50*cart.length);
   const total=subtotal+delivery;
+  useEffect(() => {
+    if (checkoutTracked.current || !cart.length) return;
+    checkoutTracked.current = true;
+    trackMetaEvent("InitiateCheckout",cartMetaPayload(cart));
+  }, [cart.length]);
   const missingAddressFields = () => {
     const missing = [];
     if (!address.email.trim()) missing.push("email address");
@@ -927,6 +953,7 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
     try{
       if(saveDetails&&user?.id)await saveDefaultAddress({userId:user.id,address,addressId:savedAddressId});
       const result=await placeCodOrder({shippingAddress:address,items:grouped});
+      trackMetaEvent("Purchase",orderMetaPayload({order:result,items:grouped,total}));
       sendOrderReceivedEmail({
         order: result,
         shippingAddress: address,
