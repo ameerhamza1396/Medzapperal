@@ -9,7 +9,7 @@ import hero from "./assets/medzapperal-hero.png";
 import { AuthPage } from "./Auth";
 import { getMyProfile, isSupabaseConfigured, supabase } from "./lib/supabase";
 import { deleteFromImageKit, uploadCustomerLogo, uploadToImageKit } from "./lib/imagekit";
-import { cartMetaPayload, loadMetaPixel, orderMetaPayload, productMetaPayload, trackMetaEvent } from "./lib/metaPixel";
+import { cartMetaPayload, loadMetaPixel, orderMetaPayload, productMetaPayload, setMetaAdvancedMatching, trackMetaEvent } from "./lib/metaPixel";
 import { archiveColor, archiveCustomerReview, claimGuestOrdersByEmail, createProductWithVariants, deleteProduct, fetchAdminData, fetchCatalog, fetchDefaultAddress, fetchStorefrontContent, placeCodOrder, saveColor, saveCustomerReview, saveDefaultAddress, sendOrderReceivedEmail, slugify, updateOrderStatus, updateProductWithVariants } from "./lib/store";
 import "./styles.css";
 
@@ -432,6 +432,9 @@ function App() {
     });
     return () => { active = false; listener.subscription.unsubscribe(); };
   }, []);
+  useEffect(() => {
+    setMetaAdvancedMatching({email:user?.email,phone:profile?.phone});
+  }, [user?.email,profile?.phone]);
 
   const navigate = (nextPage, options = {}) => {
     const nextQuery = options.query ?? "";
@@ -910,6 +913,7 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
   const [address,setAddress]=useState({country:"Pakistan",email:user?.email||"",city:"",recipient_name:profile?.full_name||user?.user_metadata?.full_name||"",complete_address:"",mobile:profile?.phone||"",secondary_mobile:""});
   useEffect(()=>{if(!address.recipient_name&&(profile?.full_name||user?.user_metadata?.full_name))setAddress(a=>({...a,recipient_name:profile?.full_name||user?.user_metadata?.full_name}))},[profile,user]);
   useEffect(()=>{if(user?.email&&!address.email)setAddress(a=>({...a,email:user.email}))},[user?.email]);
+  useEffect(()=>{setMetaAdvancedMatching({email:address.email,phone:address.mobile})},[address.email,address.mobile]);
   useEffect(()=>{
     if(!user?.id)return;
     let active=true;

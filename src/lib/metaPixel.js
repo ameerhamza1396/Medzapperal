@@ -4,17 +4,36 @@ const getRuntimePixelId = () => {
 };
 
 let initializedPixelId = "";
+let initializedAdvancedKey = "";
+let advancedMatching = {};
 
 const cleanPayload = payload => Object.fromEntries(
   Object.entries(payload || {}).filter(([, value]) => value !== undefined && value !== null && value !== "")
 );
 
+const normalizePhone = value => {
+  const digits = String(value || "").replace(/\D/g,"");
+  if (!digits) return "";
+  if (digits.startsWith("92")) return digits;
+  if (digits.startsWith("0")) return `92${digits.slice(1)}`;
+  return digits;
+};
+
+const normalizeAdvancedMatching = data => cleanPayload({
+  em: String(data?.em || data?.email || "").trim().toLowerCase(),
+  ph: normalizePhone(data?.ph || data?.phone || data?.mobile)
+});
+
+const advancedKey = data => JSON.stringify(data || {});
+
 export const metaPixelReady = () => Boolean(getRuntimePixelId());
 
-export const loadMetaPixel = () => {
+export const loadMetaPixel = (matching = {}) => {
   if (typeof window === "undefined") return false;
   const pixelId = getRuntimePixelId();
   if (!pixelId) return false;
+  const nextAdvanced = cleanPayload({...advancedMatching,...normalizeAdvancedMatching(matching)});
+  const nextAdvancedKey = advancedKey(nextAdvanced);
 
   if (!window.fbq) {
     const fbq = function () {
@@ -33,12 +52,18 @@ export const loadMetaPixel = () => {
     document.head.appendChild(script);
   }
 
-  if (initializedPixelId !== pixelId) {
-    window.fbq("init", pixelId);
+  if (initializedPixelId !== pixelId || initializedAdvancedKey !== nextAdvancedKey) {
+    window.fbq("init", pixelId, nextAdvanced);
     initializedPixelId = pixelId;
+    initializedAdvancedKey = nextAdvancedKey;
   }
 
   return true;
+};
+
+export const setMetaAdvancedMatching = data => {
+  advancedMatching = cleanPayload({...advancedMatching,...normalizeAdvancedMatching(data)});
+  return loadMetaPixel();
 };
 
 export const trackMetaEvent = (eventName, payload = {}) => {
