@@ -393,7 +393,8 @@ function App() {
     const key = `${page}:${route}:${product?.id || ""}`;
     if (lastTrackedRoute.current === key) return;
     lastTrackedRoute.current = key;
-    trackMetaEvent("PageView",{page_path:route,page_title:document.title});
+    if (window.MEDZ_PIXEL_INITIAL_PAGEVIEW_TRACKED) window.MEDZ_PIXEL_INITIAL_PAGEVIEW_TRACKED = false;
+    else trackMetaEvent("PageView",{page_path:route,page_title:document.title});
     if (product) trackMetaEvent("ViewContent",productMetaPayload(product));
   }, [page,query,selected?.id]);
   const loadCatalog = async () => {

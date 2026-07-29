@@ -35,6 +35,11 @@ export const loadMetaPixel = (matching = {}) => {
   const nextAdvanced = cleanPayload({...advancedMatching,...normalizeAdvancedMatching(matching)});
   const nextAdvancedKey = advancedKey(nextAdvanced);
 
+  if (!initializedPixelId && window.MEDZ_PIXEL_INITIALIZED_ID === pixelId) {
+    initializedPixelId = pixelId;
+    initializedAdvancedKey = advancedKey({});
+  }
+
   if (!window.fbq) {
     const fbq = function () {
       fbq.callMethod ? fbq.callMethod.apply(fbq, arguments) : fbq.queue.push(arguments);
