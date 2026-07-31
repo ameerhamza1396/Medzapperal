@@ -8,9 +8,9 @@ import {
 import hero from "./assets/medzapperal-hero.png";
 import { AuthPage } from "./Auth";
 import { getMyProfile, isSupabaseConfigured, supabase } from "./lib/supabase";
-import { deleteFromImageKit, uploadCustomerLogo, uploadToImageKit } from "./lib/imagekit";
+import { deleteFromImageKit, imageKitUrl, uploadCustomerLogo, uploadToImageKit } from "./lib/imagekit";
 import { cartMetaPayload, loadMetaPixel, orderMetaPayload, productMetaPayload, setMetaAdvancedMatching, trackMetaEvent } from "./lib/metaPixel";
-import { archiveColor, archiveCustomerReview, claimGuestOrdersByEmail, createProductWithVariants, deleteProduct, fetchAdminData, fetchCatalog, fetchDefaultAddress, fetchStorefrontContent, placeCodOrder, saveColor, saveCustomerReview, saveDefaultAddress, sendOrderReceivedEmail, slugify, updateOrderStatus, updateProductWithVariants } from "./lib/store";
+import { archiveColor, archiveCustomerReview, claimGuestOrdersByEmail, createProductWithVariants, deleteProduct, fetchAdminData, fetchAdminOrders, fetchCatalog, fetchDefaultAddress, fetchStorefrontContent, placeCodOrder, saveColor, saveCustomerReview, saveDefaultAddress, sendOrderReceivedEmail, slugify, updateOrderStatus, updateProductWithVariants } from "./lib/store";
 import "./styles.css";
 
 const palette = {
@@ -134,6 +134,7 @@ const routeFromLocation = () => {
     if (parts[1]) return {page:"shop",query:titleFromSlug(parts[1])};
     return {page:"shop",query:params.get("q") || ""};
   }
+  if (parts[0] === "admin" && parts[1] === "orders") return {page:"admin-orders"};
   const pageRoutes = { colours:"colours", account:"auth", admin:"admin", checkout:"checkout", contact:"contact", terms:"terms", shipping:"shipping", privacy:"privacy" };
   return {page:pageRoutes[parts[0]] || "home"};
 };
@@ -144,7 +145,7 @@ const routeUrl = ({page,query,product}) => {
     if (query?.startsWith("colour:")) return `/shop/colour/${slugify(query.slice(7))}`;
     return query ? `/shop/${slugify(query)}` : "/shop";
   }
-  const pagePaths = { colours:"/colours", auth:"/account", admin:"/admin", checkout:"/checkout", contact:"/contact", terms:"/terms", shipping:"/shipping", privacy:"/privacy" };
+  const pagePaths = { colours:"/colours", auth:"/account", admin:"/admin", "admin-orders":"/admin/orders", checkout:"/checkout", contact:"/contact", terms:"/terms", shipping:"/shipping", privacy:"/privacy" };
   return pagePaths[page] || "/";
 };
 const updateSeo = ({page,query,product}) => {
@@ -159,6 +160,7 @@ const updateSeo = ({page,query,product}) => {
     : page === "privacy" ? "Privacy Policy | MEDZ APPAREL"
     : page === "checkout" ? "Checkout | MEDZ APPAREL"
     : page === "auth" ? "Account and Order Tracking | MEDZ APPAREL"
+    : page === "admin-orders" ? "Order Management | MEDZ APPAREL"
     : page === "admin" ? "Admin | MEDZ APPAREL"
     : "MEDZ APPAREL | The Doctor's Thread";
   const description = product?.description || (page === "shop"
@@ -482,7 +484,8 @@ function App() {
     {page === "product" && selected && <Product product={selected} add={add} openProduct={openProduct} products={products} onBack={()=>navigate("home")}/>}
     {page === "product" && !selected && (catalogLoading ? <ProductPageSkeleton/> : <main className="auth-page"><section className="account-card"><Package/><p className="eyebrow">PRODUCT</p><h1>Product not found</h1><button className="primary" onClick={()=>navigate("home")}>Back to home</button></section></main>)}
     {page === "auth" && <AuthPage user={user} profile={profile} onDone={() => {const returnToCheckout=localStorage.getItem(CHECKOUT_RETURN_KEY)==="1";localStorage.removeItem(CHECKOUT_RETURN_KEY);navigate(returnToCheckout?"checkout":"home",{replace:true});}} onAdmin={() => navigate("admin")} onContact={() => navigate("contact")} onCheckout={() => navigate("checkout")} onSignOut={async () => { await supabase?.auth.signOut(); navigate("home"); }}/>}
-    {page === "admin" && <Admin user={user} profile={profile} authReady={authReady} catalogLoading={catalogLoading} onLogin={() => navigate("auth")} products={products} onCreated={loadCatalog} />}
+    {page === "admin" && <Admin user={user} profile={profile} authReady={authReady} catalogLoading={catalogLoading} onLogin={() => navigate("auth")} onOrders={() => navigate("admin-orders")} products={products} onCreated={loadCatalog} />}
+    {page === "admin-orders" && <AdminOrdersPage user={user} profile={profile} authReady={authReady} onLogin={() => navigate("auth")} onAdmin={() => navigate("admin")} />}
     {page === "checkout" && <Checkout user={user} profile={profile} cart={cart} setCart={setCart} onLogin={(returnToCheckout=true)=>{if(returnToCheckout)localStorage.setItem(CHECKOUT_RETURN_KEY,"1");navigate("auth")}} onShop={()=>goShop("All")} />}
     {["terms","shipping","privacy"].includes(page) && <PolicyPage policy={policyContent[page]} />}
     {page === "contact" && <ContactPage />}
@@ -1020,8 +1023,26 @@ const adminOrderStatuses = [
   ["pending","Received"],
   ["processing","Processing"],
   ["shipped","Shipping"],
-  ["cancelled","Declined"]
+  ["delivered","Delivered"],
+  ["cancelled","Declined"],
+  ["refunded","Refunded"]
 ];
+const adminOrderStatusLabel = status => adminOrderStatuses.find(([value])=>value===status)?.[1] || status;
+const orderReference = order => `#${String(order?.id || "").slice(0,8).toUpperCase()}`;
+const orderAddress = order => order?.shipping_address || {};
+const orderCustomerName = order => orderAddress(order).recipient_name || orderAddress(order).name || "Customer";
+const orderCustomerContact = order => [orderAddress(order).email,orderAddress(order).mobile,orderAddress(order).secondary_mobile].filter(Boolean).join(" · ");
+const orderPlacedAt = order => new Date(order.created_at).toLocaleString("en-PK",{dateStyle:"medium",timeStyle:"short"});
+const orderItemTitle = item => item.product_variants?.products?.name || "Product";
+const orderSearchText = order => [
+  order.id,
+  order.status,
+  orderCustomerName(order),
+  orderCustomerContact(order),
+  orderAddress(order).city,
+  orderAddress(order).complete_address,
+  ...(order.order_items || []).map(orderItemTitle)
+].join(" ").toLowerCase();
 
 function AdminOrderEditor({order,onUpdated}) {
   const [status,setStatus] = useState(order.status);
@@ -1047,6 +1068,71 @@ function AdminOrderEditor({order,onUpdated}) {
     </div>
     {feedback && <p className={feedback==="Updated"?"admin-order-success":"admin-order-error"}>{feedback}</p>}
   </article>;
+}
+
+function AdminOrdersPage({user,profile,authReady,onLogin,onAdmin}) {
+  const [orders,setOrders] = useState([]);
+  const [loading,setLoading] = useState(true);
+  const [error,setError] = useState("");
+  const [status,setStatus] = useState("all");
+  const [search,setSearch] = useState("");
+  const [selectedId,setSelectedId] = useState("");
+  const loadOrders = async () => {
+    setLoading(true); setError("");
+    try {
+      const data = await fetchAdminOrders();
+      setOrders(data);
+      setSelectedId(current => current || data[0]?.id || "");
+    } catch (loadError) { setError(loadError.message); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => {
+    if (user && ["admin","staff"].includes(profile?.role)) loadOrders();
+  }, [user,profile]);
+  if (!authReady) return <AdminShellSkeleton/>;
+  if (!user || !["admin","staff"].includes(profile?.role)) return <main className="auth-page"><section className="account-card"><ShieldCheck size={35}/><p className="eyebrow">RESTRICTED AREA</p><h1>Admin access required.</h1><p>Sign in with an administrator or staff account to manage orders.</p><button className="primary" onClick={onLogin}>Sign in</button></section></main>;
+  const normalizedSearch = search.trim().toLowerCase();
+  const filtered = orders.filter(order =>
+    (status === "all" || order.status === status) &&
+    (!normalizedSearch || orderSearchText(order).includes(normalizedSearch))
+  );
+  const selected = orders.find(order=>order.id===selectedId) || filtered[0] || orders[0] || null;
+  const counts = orders.reduce((acc,order)=>({...acc,[order.status]:(acc[order.status]||0)+1}),{});
+  const pendingCount = orders.filter(order=>["pending","processing"].includes(order.status)).length;
+  const revenue = orders.filter(order=>!["cancelled","refunded"].includes(order.status)).reduce((sum,order)=>sum+Number(order.total_amount||0),0);
+  return <main className="admin admin-orders-page">
+    <div className="admin-title"><div><p className="eyebrow">ADMIN / ORDERS</p><h1>Order management.</h1><p>Trace every order, view delivery and customization details, and update fulfilment status.</p></div><div className="admin-title-actions"><button onClick={onAdmin}><ArrowLeft size={16}/> Catalog admin</button><button className="primary" onClick={loadOrders} disabled={loading}>{loading?"Refreshing…":"Refresh orders"}</button></div></div>
+    <div className="metrics order-metrics"><div><span><ShoppingBag/></span><p>Total orders</p><h2>{orders.length}</h2><small>Full history</small></div><div><span><Package/></span><p>Active work</p><h2>{pendingCount}</h2><small>Received / processing</small></div><div><span><Banknote/></span><p>Order value</p><h2>{pkr(revenue)}</h2><small>Excluding declined/refunded</small></div><div><span><TruckIcon/></span><p>Shipping</p><h2>{counts.shipped || 0}</h2><small>Currently dispatched</small></div></div>
+    <section className="orders-workbench">
+      <div className="orders-list-panel">
+        <div className="orders-toolbar"><div className="search-box"><Search size={18}/><input value={search} onChange={event=>setSearch(event.target.value)} placeholder="Search order, name, email, mobile or product"/></div><select value={status} onChange={event=>setStatus(event.target.value)}><option value="all">All statuses</option>{adminOrderStatuses.map(([value,label])=><option value={value} key={value}>{label} ({counts[value]||0})</option>)}</select></div>
+        {error&&<div className="auth-error">{error}</div>}
+        {loading ? <div className="admin-order-list">{Array.from({length:6},(_,index)=><div className="admin-order-card order-row-skeleton" key={index}><span className="skeleton skeleton-line"/><span className="skeleton skeleton-title small"/><span className="skeleton skeleton-line"/></div>)}</div> :
+          filtered.length ? <div className="admin-order-rows">{filtered.map(order=><button key={order.id} className={selected?.id===order.id?"selected":""} onClick={()=>setSelectedId(order.id)}><span><b>{orderReference(order)}</b><small>{orderPlacedAt(order)}</small></span><span><strong>{orderCustomerName(order)}</strong><small>{orderCustomerContact(order)||"No contact saved"}</small></span><em className={`order-status ${order.status}`}>{adminOrderStatusLabel(order.status)}</em><b>{pkr(order.total_amount)}</b></button>)}</div> :
+          <div className="admin-empty">No orders match this view.</div>}
+      </div>
+      <aside className="order-detail-panel">{selected ? <AdminOrderDetail order={selected} onUpdated={loadOrders}/> : <div className="admin-empty large">Select an order to view details.</div>}</aside>
+    </section>
+  </main>;
+}
+
+function TruckIcon() {
+  return <Package/>;
+}
+
+function AdminOrderDetail({order,onUpdated}) {
+  const address = orderAddress(order);
+  return <div className="order-detail">
+    <div className="order-detail-head"><div><p className="eyebrow">ORDER DETAILS</p><h2>{orderReference(order)}</h2><span>Placed {orderPlacedAt(order)}</span></div><em className={`order-status ${order.status}`}>{adminOrderStatusLabel(order.status)}</em></div>
+    <div className="order-detail-grid">
+      <section><h3>Customer</h3><b>{orderCustomerName(order)}</b><p>{orderCustomerContact(order)||"No phone/email saved"}</p></section>
+      <section><h3>Delivery</h3><p>{address.complete_address || "No address"}<br/>{address.city ? `${address.city}, Pakistan` : "Pakistan"}</p></section>
+      <section><h3>Total payable</h3><b>{pkr(order.total_amount)}</b><p>Cash on delivery</p></section>
+      <section><h3>Updated</h3><b>{new Date(order.updated_at || order.created_at).toLocaleString("en-PK",{dateStyle:"medium",timeStyle:"short"})}</b><p>{order.customer_message || "No custom customer message."}</p></section>
+    </div>
+    <div className="order-detail-items"><h3>Items and customizations</h3>{(order.order_items||[]).map(item=>{const custom=item.customization||{};const details=describeCustomization(custom)||[item.product_variants?.size,item.product_variants?.colors?.name].filter(Boolean).join(" · ")||"Standard";const productImages=item.product_variants?.products?.product_images||[];const image=[...productImages].sort((a,b)=>a.sort_order-b.sort_order)[0]?.url;return <article key={item.id}>{image&&<img src={imageKitUrl(image,120,150)} alt={orderItemTitle(item)}/>}<div><b>{orderItemTitle(item)} × {item.quantity}</b><span>{details}</span>{item.product_variants?.sku&&<small>SKU: {item.product_variants.sku}</small>}{custom.name_engraving&&<small>Name engraving: {custom.name_engraving}</small>}{custom.logo_engraving?.url&&<a href={custom.logo_engraving.url} target="_blank" rel="noreferrer">View uploaded logo</a>}{Object.keys(custom.measurements||{}).length>0&&<small>Measurements: {Object.entries(custom.measurements).filter(([,value])=>value).map(([key,value])=>`${key.replaceAll("_"," ")} ${value}″`).join(", ")}</small>}</div><strong>{pkr(Number(item.unit_price||0)*Number(item.quantity||1))}</strong></article>})}</div>
+    <AdminOrderEditor order={order} onUpdated={onUpdated}/>
+  </div>;
 }
 
 function AdminReviewManager({ reviews = [], onUpdated }) {
@@ -1176,7 +1262,7 @@ function AdminColorManager({ colors = [], onUpdated }) {
   </section>;
 }
 
-function Admin({ user, profile, authReady, catalogLoading, onLogin, products, onCreated }) {
+function Admin({ user, profile, authReady, catalogLoading, onLogin, onOrders, products, onCreated }) {
   const [uploading,setUploading] = useState(false);
   const [productImages,setProductImages] = useState([]);
   const [removedImageFileIds,setRemovedImageFileIds] = useState([]);
@@ -1286,7 +1372,7 @@ function Admin({ user, profile, authReady, catalogLoading, onLogin, products, on
   const revenue=adminData.orders.reduce((sum,o)=>["paid","processing","shipped","delivered"].includes(o.status)?sum+Number(o.total_amount):sum,0);
   const metrics=[["Catalog products",catalogLoading?null:String(products.length),catalogLoading?null:"Live"],["Recorded revenue",pkr(revenue),"From orders"],["Pending orders",String(adminData.orders.filter(o=>o.status==="pending").length),"Needs review"],["Low stock",catalogLoading?null:String(products.filter(p=>p.stock<10).length),catalogLoading?null:"Products"]];
   return <main className="admin">
-    <div className="admin-title"><div><p className="eyebrow">ADMIN / OVERVIEW</p><h1>Good morning, {profile?.full_name?.split(" ")[0] || "Admin"}.</h1><p>Manage the live Supabase catalog and ImageKit media.</p></div><button className="primary" onClick={()=>showForm?(resetEditor(),setShowForm(false)):openNew()}>{showForm?<X size={17}/>:<Plus size={17}/>} {showForm?"Close form":"Add product"}</button></div>
+    <div className="admin-title"><div><p className="eyebrow">ADMIN / OVERVIEW</p><h1>Good morning, {profile?.full_name?.split(" ")[0] || "Admin"}.</h1><p>Manage the live Supabase catalog, ImageKit media, and fulfilment.</p></div><div className="admin-title-actions"><button onClick={onOrders}>Order management <ArrowRight size={16}/></button><button className="primary" onClick={()=>showForm?(resetEditor(),setShowForm(false)):openNew()}>{showForm?<X size={17}/>:<Plus size={17}/>} {showForm?"Close form":"Add product"}</button></div></div>
     {formError && !showForm && <div className="auth-error admin-page-error">{formError}</div>}
     {showForm && <form className="product-editor" onSubmit={submitProduct}>
       <div className="editor-heading"><div><p className="eyebrow">{editingId?"EDIT CATALOG ITEM":"NEW CATALOG ITEM"}</p><h2>{editingId?"Update product":"Product details"}</h2></div><span>All fields marked * are required</span></div>

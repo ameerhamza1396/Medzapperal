@@ -231,8 +231,41 @@ a.contact-card:hover,.contact-social:hover{transform:translateY(-3px);border-col
 .admin-order-success,.admin-order-error{margin:10px 0 0;font-size:10px}
 .admin-order-success{color:var(--accent)}
 .admin-order-error{color:#a13e32}
+.admin-title-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+.admin-title-actions>button{border:1px solid var(--line);padding:12px 15px;font-size:11px;display:flex;align-items:center;gap:7px}
+.admin-title-actions>.primary{border-color:transparent}
+.orders-workbench{display:grid;grid-template-columns:minmax(360px,.95fr) minmax(0,1.35fr);gap:16px;margin-top:16px;align-items:start}
+.orders-list-panel,.order-detail-panel{background:var(--surface);border:1px solid var(--line);padding:20px}
+.orders-toolbar{display:grid;grid-template-columns:1fr 180px;gap:10px;margin-bottom:15px}
+.orders-toolbar select{border:1px solid var(--line);background:var(--bg);color:var(--text);padding:0 12px;min-height:46px;outline:0;font-size:11px}
+.admin-order-rows{display:grid;gap:8px;max-height:72vh;overflow:auto;padding-right:3px}
+.admin-order-rows>button{display:grid;grid-template-columns:1fr 1.35fr auto auto;gap:12px;align-items:center;text-align:left;border:1px solid var(--line);padding:13px;background:var(--bg)}
+.admin-order-rows>button.selected{border-color:var(--accent);background:var(--accent2)}
+.admin-order-rows span,.admin-order-rows b,.admin-order-rows small,.admin-order-rows strong{display:block}
+.admin-order-rows b,.admin-order-rows strong{font-size:11px}
+.admin-order-rows small{font-size:9px;color:var(--muted);margin-top:4px;line-height:1.35}
+.order-detail-panel{position:sticky;top:92px}
+.order-detail-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;border-bottom:1px solid var(--line);padding-bottom:17px}
+.order-detail-head h2{font:600 28px Manrope;margin:3px 0;letter-spacing:-1px}
+.order-detail-head span{font-size:10px;color:var(--muted)}
+.order-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:15px 0}
+.order-detail-grid section{border:1px solid var(--line);background:var(--bg);padding:14px;min-height:105px}
+.order-detail-grid h3,.order-detail-items h3{font:600 11px Manrope;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 9px}
+.order-detail-grid b,.order-detail-grid p{display:block;font-size:11px;margin:0;line-height:1.55}
+.order-detail-grid p{color:var(--muted);margin-top:5px}
+.order-detail-items{border-top:1px solid var(--line);padding-top:16px}
+.order-detail-items article{display:grid;grid-template-columns:62px 1fr auto;gap:12px;align-items:center;border-bottom:1px solid var(--line);padding:12px 0}
+.order-detail-items img{width:62px;height:78px;object-fit:cover;background:var(--bg)}
+.order-detail-items b,.order-detail-items span,.order-detail-items small,.order-detail-items a{display:block;font-size:10px;line-height:1.5}
+.order-detail-items span,.order-detail-items small{color:var(--muted)}
+.order-detail-items a{color:var(--accent);text-decoration:underline}
+.order-detail .admin-order-card{margin-top:16px;background:var(--bg)}
+.order-detail .admin-order-summary,.order-detail .admin-order-items{display:none}
+.order-row-skeleton{display:grid;gap:10px}
 .customer-order-message{margin-top:9px!important;padding-left:9px;border-left:2px solid var(--accent);color:var(--text)!important;font-style:italic}
 @media(max-width:720px){.admin-order-controls{grid-template-columns:1fr}.admin-order-summary{grid-template-columns:1fr 1fr}.admin-order-summary>strong{grid-column:1/-1}.admin-order-controls .primary{width:100%}}
+@media(max-width:980px){.orders-workbench{grid-template-columns:1fr}.order-detail-panel{position:static}.admin-order-rows{max-height:none}.admin-order-rows>button{grid-template-columns:1fr 1fr}.orders-toolbar{grid-template-columns:1fr}}
+@media(max-width:620px){.admin-title-actions{justify-content:flex-start}.admin-title-actions>button{width:100%;justify-content:center}.order-detail-grid,.order-detail-items article{grid-template-columns:1fr}.order-detail-items img{width:100%;height:190px}.admin-order-rows>button{grid-template-columns:1fr}.orders-list-panel,.order-detail-panel{padding:14px}}
 
 /* 2026 storefront merchandising */
 .nav-group{position:relative;height:100%;display:flex;align-items:center}

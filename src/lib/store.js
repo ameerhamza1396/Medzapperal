@@ -234,6 +234,36 @@ export async function fetchAdminData() {
   };
 }
 
+export async function fetchAdminOrders({ pageSize = 1000 } = {}) {
+  if (!supabase) return [];
+  const select = `
+    id,user_id,status,total_amount,shipping_address,internal_notes,created_at,updated_at,
+    order_items(
+      id,quantity,unit_price,customization,
+      product_variants(
+        id,size,sku,
+        colors(id,name,hex),
+        products(id,name,slug,product_images(url,sort_order))
+      )
+    )
+  `;
+  const rows = [];
+  let from = 0;
+  while (true) {
+    const to = from + pageSize - 1;
+    const { data, error } = await supabase
+      .from("orders")
+      .select(select)
+      .order("created_at", { ascending: false })
+      .range(from, to);
+    if (error) throw error;
+    rows.push(...(data || []));
+    if (!data || data.length < pageSize) break;
+    from += pageSize;
+  }
+  return rows.map(order => ({ ...order, customer_message: order.internal_notes }));
+}
+
 export async function saveCustomerReview(review) {
   if (!supabase) throw new Error("Supabase is not configured.");
   const row = {
