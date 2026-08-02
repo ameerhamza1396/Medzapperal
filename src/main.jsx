@@ -457,12 +457,12 @@ function App() {
     navigate("product",{product:p});
     requestAnimationFrame(()=>window.scrollTo({top:0,behavior:"smooth"}));
   };
-  const add = (product, size = product.sizes[0], color = product.colors[0], customization = {}) => {
+  const add = (product, size = product.sizes[0], color = product.colors[0], customization = {}, options = {}) => {
     const attributes = productAttributes(product);
     const variant = variantForSelection(product,size,color,attributes);
     if (!variant) {
       window.alert("That product option is not available yet. Please choose another option.");
-      return;
+      return null;
     }
     const basePrice = variant.price_override == null ? product.price : Number(variant.price_override);
     const measurementFee = Object.values(customization.measurements || {}).filter(value=>String(value).trim()).length * 100;
@@ -472,7 +472,16 @@ function App() {
     const cartItem = { ...product, price, basePrice, customization:{...customization,size:selectedSize,color:selectedColor}, cartId: `${Date.now()}-${Math.random()}`, size:selectedSize, color:selectedColor, variantId:variant.id };
     setCart(c => [...c, cartItem]);
     trackMetaEvent("AddToCart",cartMetaPayload([cartItem]));
-    setCartOpen(true);
+    if (options.openCart !== false) setCartOpen(true);
+    return cartItem;
+  };
+  const buyNow = (product, size, color, customization, quantity = 1) => {
+    let added = false;
+    Array.from({length:quantity}).forEach(()=>{ if (add(product,size,color,customization,{openCart:false})) added = true; });
+    if (added) {
+      setCartOpen(false);
+      navigate("checkout");
+    }
   };
 
   return <div className="app">
@@ -481,7 +490,7 @@ function App() {
     {page === "home" && <Home {...{goShop,openProduct,add,products,catalogLoading,categories,reviews}} />}
     {page === "shop" && <Shop initialQuery={query} openProduct={openProduct} add={add} products={products} categories={categories} loading={catalogLoading} error={catalogError}/>}
     {page === "colours" && <ColourPalette products={products} onSelect={colour=>goShop(`colour:${colour}`)} />}
-    {page === "product" && selected && <Product product={selected} add={add} openProduct={openProduct} products={products} onBack={()=>navigate("home")}/>}
+    {page === "product" && selected && <Product product={selected} add={add} buyNow={buyNow} openProduct={openProduct} products={products} onBack={()=>navigate("home")}/>}
     {page === "product" && !selected && (catalogLoading ? <ProductPageSkeleton/> : <main className="auth-page"><section className="account-card"><Package/><p className="eyebrow">PRODUCT</p><h1>Product not found</h1><button className="primary" onClick={()=>navigate("home")}>Back to home</button></section></main>)}
     {page === "auth" && <AuthPage user={user} profile={profile} onDone={() => {const returnToCheckout=localStorage.getItem(CHECKOUT_RETURN_KEY)==="1";localStorage.removeItem(CHECKOUT_RETURN_KEY);navigate(returnToCheckout?"checkout":"home",{replace:true});}} onAdmin={() => navigate("admin")} onContact={() => navigate("contact")} onCheckout={() => navigate("checkout")} onSignOut={async () => { await supabase?.auth.signOut(); navigate("home"); }}/>}
     {page === "admin" && <Admin user={user} profile={profile} authReady={authReady} catalogLoading={catalogLoading} onLogin={() => navigate("auth")} onOrders={() => navigate("admin-orders")} products={products} onCreated={loadCatalog} />}
@@ -761,7 +770,7 @@ function Filter({title,options,value,set,swatch}) {
   return <div className="filter"><h3>{title}<ChevronDown size={16}/></h3>{options.map(o=><label key={o}><input type="radio" checked={value===o} onChange={()=>set(o)}/>{swatch && o!=="All" && <i style={{background:palette[o]}}/>}{o}</label>)}</div>;
 }
 
-function Product({product,add,openProduct,products,onBack}) {
+function Product({product,add,buyNow,openProduct,products,onBack}) {
   useEffect(()=>{window.scrollTo({top:0,behavior:"smooth"})},[product.id]);
   const attributes = productAttributes(product);
   const genderOptions = product.gender === "Unisex" ? ["Men","Women"] : [product.gender];
@@ -867,7 +876,6 @@ function Product({product,add,openProduct,products,onBack}) {
       <div className="product-gallery-wrap"><div className={galleryZoom.active?"gallery zoomable-gallery is-zooming":"gallery zoomable-gallery"} onPointerEnter={moveGalleryZoom} onPointerMove={moveGalleryZoom} onPointerDown={moveGalleryZoom} onPointerUp={()=>setGalleryZoom(current=>({...current,active:false}))} onPointerCancel={()=>setGalleryZoom(current=>({...current,active:false}))} onPointerLeave={()=>setGalleryZoom(current=>({...current,active:false}))} style={{"--zoom-x":`${galleryZoom.x}%`,"--zoom-y":`${galleryZoom.y}%`}} aria-label="Move over product picture to zoom"><img src={design||product.image} alt={product.name}/><span className="zoom-hint">Hover or drag to zoom</span><div className="gallery-count">{String(Math.max(1,galleryImages.findIndex(item=>item.url===design)+1)).padStart(2,"0")} / {String(galleryImages.length).padStart(2,"0")}</div></div>{galleryImages.length>1&&<div className="design-gallery" aria-label={colourBased?"Choose a design":"Product gallery"}>{galleryImages.slice(0,8).map((image,index)=><button className={design===image.url?"selected":""} key={image.id} onClick={()=>setDesign(image.url)}><img src={image.url} alt={`${product.name} view ${index+1}`}/><span>{index+1}</span></button>)}</div>}</div>
       <div className="product-info">
         <p className="eyebrow">{product.category} · {product.gender === "Unisex" ? "Men & Women" : product.gender}</p><h1>{product.name}</h1><p className={product.isOnSale?"price sale-price":"price"}>{product.isOnSale&&<del>{pkr(product.regularPrice)}</del>}{pkr(product.price)}</p>
-        <p className="description">Polished enough for rounds, comfortable enough for the longest shift. Crafted in our signature {product.fabric.toLowerCase()} fabric with a clean, easy fit and thoughtfully placed utility.</p>
         {attributes.gender&&<div className="selector"><div><b>Gender</b><span>{gender}</span></div><div className="size-options">{genderOptions.map(option=><button key={option} className={gender===option?"selected":""} onClick={()=>setGender(option)}>{option}</button>)}</div></div>}
         {attributes.color&&!colourBased&&<div className="selector"><div><b>Colour</b><span>{color}</span></div><div className="color-options">{allowedColors.map(c=><button key={c} className={color===c?"selected":""} onClick={()=>setColor(c)} style={{"--swatch":product.variants.find(variant=>variant.colors?.name===c)?.colors?.hex||palette[c]||"#888"}} aria-label={c}/>)}</div></div>}
         {attributes.size&&<div className="selector"><div><b>Size</b><button className="underlined" onClick={()=>setSizeChart(true)}>Size chart</button></div><div className="size-options">{allowedSizes.map(s=><button key={s} className={size===s?"selected":""} onClick={()=>setSize(s)}>{s}</button>)}</div></div>}
@@ -880,7 +888,7 @@ function Product({product,add,openProduct,products,onBack}) {
           {attributes.trouser&&<OptionButtons label="Trouser style" options={["Straight","Bottom/Cargo"]} value={trouserStyle} setValue={setTrouserStyle}/>}
         </div>}</section>}
         {scrubProduct&&<section className="product-addons"><div><b>Add with this order</b><span>{addons.length ? `Add-ons total: ${pkr(addonsFee)}` : "Optional add-ons"}</span></div>{addonOptions.map(option=><label key={option.value}><input type="checkbox" checked={addons.includes(option.value)} onChange={()=>setAddons(current=>current.includes(option.value)?current.filter(item=>item!==option.value):[...current,option.value])}/><span>{option.label}</span><strong>+{pkr(option.price)}</strong></label>)}</section>}
-        <div className="buy-row"><div className="quantity"><button onClick={()=>setQty(Math.max(1,qty-1))}><Minus size={15}/></button>{qty}<button onClick={()=>setQty(qty+1)}><Plus size={15}/></button></div><button className="primary" disabled={(effectiveCustomize&&logoEngraving&&!logo)||(hasRequiredName&&!engravingName.trim())} onClick={()=>Array.from({length:qty}).forEach(()=>add(product,size,color,customization))}>Add to bag — {pkr((product.price+customFee)*qty)}</button><button className="wish" aria-label="Save product"><Heart/></button><button className="wish share-product" aria-label="Share product" onClick={shareProduct}><Share2/></button></div>
+        <div className="buy-row"><div className="quantity"><button onClick={()=>setQty(Math.max(1,qty-1))}><Minus size={15}/></button>{qty}<button onClick={()=>setQty(qty+1)}><Plus size={15}/></button></div><button className="primary" disabled={(effectiveCustomize&&logoEngraving&&!logo)||(hasRequiredName&&!engravingName.trim())} onClick={()=>Array.from({length:qty}).forEach(()=>add(product,size,color,customization))}>Add to bag — {pkr((product.price+customFee)*qty)}</button><button className="primary buy-now-button" disabled={(effectiveCustomize&&logoEngraving&&!logo)||(hasRequiredName&&!engravingName.trim())} onClick={()=>buyNow(product,size,color,customization,qty)}>Buy it now</button><button className="wish" aria-label="Save product"><Heart/></button><button className="wish share-product" aria-label="Share product" onClick={shareProduct}><Share2/></button></div>
         {shareStatus&&<p className="share-status">{shareStatus}</p>}
         <p className="stock"><i/> In stock — ready to ship</p>
         {Object.entries(productInfoSections).map(([title,copy])=><div className={openInfo===title?"accordion-panel open":"accordion-panel"} key={title}><button className="accordion" onClick={()=>setOpenInfo(current=>current===title?"":title)}>{title}{openInfo===title?<Minus size={18}/>:<Plus size={18}/>}</button>{openInfo===title&&<p>{copy}</p>}</div>)}
@@ -1077,6 +1085,7 @@ function AdminOrdersPage({user,profile,authReady,onLogin,onAdmin}) {
   const [status,setStatus] = useState("all");
   const [search,setSearch] = useState("");
   const [selectedId,setSelectedId] = useState("");
+  const [detailModalOpen,setDetailModalOpen] = useState(false);
   const loadOrders = async () => {
     setLoading(true); setError("");
     try {
@@ -1108,11 +1117,12 @@ function AdminOrdersPage({user,profile,authReady,onLogin,onAdmin}) {
         <div className="orders-toolbar"><div className="search-box"><Search size={18}/><input value={search} onChange={event=>setSearch(event.target.value)} placeholder="Search order, name, email, mobile or product"/></div><select value={status} onChange={event=>setStatus(event.target.value)}><option value="all">All statuses</option>{adminOrderStatuses.map(([value,label])=><option value={value} key={value}>{label} ({counts[value]||0})</option>)}</select></div>
         {error&&<div className="auth-error">{error}</div>}
         {loading ? <div className="admin-order-list">{Array.from({length:6},(_,index)=><div className="admin-order-card order-row-skeleton" key={index}><span className="skeleton skeleton-line"/><span className="skeleton skeleton-title small"/><span className="skeleton skeleton-line"/></div>)}</div> :
-          filtered.length ? <div className="admin-order-rows">{filtered.map(order=><button key={order.id} className={selected?.id===order.id?"selected":""} onClick={()=>setSelectedId(order.id)}><span><b>{orderReference(order)}</b><small>{orderPlacedAt(order)}</small></span><span><strong>{orderCustomerName(order)}</strong><small>{orderCustomerContact(order)||"No contact saved"}</small></span><em className={`order-status ${order.status}`}>{adminOrderStatusLabel(order.status)}</em><b>{pkr(order.total_amount)}</b></button>)}</div> :
+          filtered.length ? <div className="admin-order-rows">{filtered.map(order=><button key={order.id} className={selected?.id===order.id?"selected":""} onClick={()=>{setSelectedId(order.id);setDetailModalOpen(true);}}><span><b>{orderReference(order)}</b><small>{orderPlacedAt(order)}</small></span><span><strong>{orderCustomerName(order)}</strong><small>{orderCustomerContact(order)||"No contact saved"}</small></span><em className={`order-status ${order.status}`}>{adminOrderStatusLabel(order.status)}</em><b>{pkr(order.total_amount)}</b></button>)}</div> :
           <div className="admin-empty">No orders match this view.</div>}
       </div>
       <aside className="order-detail-panel">{selected ? <AdminOrderDetail order={selected} onUpdated={loadOrders}/> : <div className="admin-empty large">Select an order to view details.</div>}</aside>
     </section>
+    {selected&&<div className={detailModalOpen?"order-detail-modal show":"order-detail-modal"} onClick={()=>setDetailModalOpen(false)}><section onClick={event=>event.stopPropagation()}><AdminOrderDetail order={selected} onUpdated={loadOrders} onClose={()=>setDetailModalOpen(false)}/></section></div>}
   </main>;
 }
 
@@ -1120,10 +1130,10 @@ function TruckIcon() {
   return <Package/>;
 }
 
-function AdminOrderDetail({order,onUpdated}) {
+function AdminOrderDetail({order,onUpdated,onClose}) {
   const address = orderAddress(order);
   return <div className="order-detail">
-    <div className="order-detail-head"><div><p className="eyebrow">ORDER DETAILS</p><h2>{orderReference(order)}</h2><span>Placed {orderPlacedAt(order)}</span></div><em className={`order-status ${order.status}`}>{adminOrderStatusLabel(order.status)}</em></div>
+    <div className="order-detail-head"><div><p className="eyebrow">ORDER DETAILS</p><h2>{orderReference(order)}</h2><span>Placed {orderPlacedAt(order)}</span></div><div className="order-detail-head-actions"><em className={`order-status ${order.status}`}>{adminOrderStatusLabel(order.status)}</em>{onClose&&<button className="modal-close-button" onClick={onClose} aria-label="Close order details"><X size={18}/></button>}</div></div>
     <div className="order-detail-grid">
       <section><h3>Customer</h3><b>{orderCustomerName(order)}</b><p>{orderCustomerContact(order)||"No phone/email saved"}</p></section>
       <section><h3>Delivery</h3><p>{address.complete_address || "No address"}<br/>{address.city ? `${address.city}, Pakistan` : "Pakistan"}</p></section>
