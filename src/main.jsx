@@ -4,14 +4,14 @@ import { createRoot } from "react-dom/client";
 import {
   ArrowLeft, ArrowRight, Banknote, BarChart3, Check, ChevronDown, CircleUserRound,
   CreditCard, Facebook, Heart, Instagram, LayoutGrid, Mail, MapPin, Menu, MessageCircle, Minus, Moon, Package, Phone, Plus, Ruler, Search, ShoppingBag,
-  Share2, ShieldCheck, SlidersHorizontal, Sparkles, Star, Sun, Trash2, Upload, X
+  Share2, ShieldCheck, SlidersHorizontal, Sparkles, Star, Sun, Tag, Trash2, Upload, X
 } from "lucide-react";
 import hero from "./assets/medzapperal-hero.png";
 import { AuthPage } from "./Auth";
 import { getMyProfile, isSupabaseConfigured, supabase } from "./lib/supabase";
 import { deleteFromImageKit, imageKitUrl, uploadCustomerLogo, uploadToImageKit } from "./lib/imagekit";
 import { cartMetaPayload, loadMetaPixel, orderMetaPayload, productMetaPayload, setMetaAdvancedMatching, trackMetaEvent } from "./lib/metaPixel";
-import { archiveColor, archiveCustomerReview, claimGuestOrdersByEmail, createProductWithVariants, deleteProduct, fetchAdminData, fetchAdminOrders, fetchCatalog, fetchDefaultAddress, fetchStorefrontContent, placeCodOrder, saveColor, saveCustomerReview, saveDefaultAddress, sendOrderReceivedEmail, slugify, updateOrderStatus, updateProductWithVariants } from "./lib/store";
+import { archiveColor, archiveCustomerReview, claimGuestOrdersByEmail, createProductWithVariants, deleteProduct, fetchAdminData, fetchAdminOrders, fetchCatalog, fetchDefaultAddress, fetchStorefrontContent, placeCodOrder, saveColor, saveCustomerReview, saveDefaultAddress, savePromoCode, sendOrderReceivedEmail, setPromoCodeActive, slugify, updateOrderStatus, updateProductWithVariants, validatePromoCode } from "./lib/store";
 import "./styles.css";
 
 const palette = {
@@ -938,6 +938,10 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
   const [order,setOrder]=useState(null);
   const [saveDetails,setSaveDetails]=useState(Boolean(user));
   const [savedAddressId,setSavedAddressId]=useState(null);
+  const [promoInput,setPromoInput]=useState("");
+  const [appliedPromo,setAppliedPromo]=useState(null);
+  const [promoMessage,setPromoMessage]=useState("");
+  const [applyingPromo,setApplyingPromo]=useState(false);
   const checkoutTracked = useRef(false);
   const [address,setAddress]=useState({country:"Pakistan",email:user?.email||"",city:"",recipient_name:profile?.full_name||user?.user_metadata?.full_name||"",complete_address:"",mobile:profile?.phone||"",secondary_mobile:""});
   useEffect(()=>{if(!address.recipient_name&&(profile?.full_name||user?.user_metadata?.full_name))setAddress(a=>({...a,recipient_name:profile?.full_name||user?.user_metadata?.full_name}))},[profile,user]);
@@ -964,7 +968,14 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
   const grouped=useMemo(()=>Object.values(cart.reduce((acc,item)=>{const key=`${item.variantId}:${JSON.stringify(item.customization||{})}`;if(!acc[key])acc[key]={...item,groupKey:key,quantity:0};acc[key].quantity++;return acc},{})),[cart]);
   const subtotal=grouped.reduce((sum,item)=>sum+item.price*item.quantity,0);
   const delivery=200+(50*cart.length);
-  const total=subtotal+delivery;
+  const discount=appliedPromo?.subtotal===subtotal ? Math.min(subtotal,Number(appliedPromo.discount_amount)||0) : 0;
+  const total=subtotal+delivery-discount;
+  useEffect(()=>{
+    if(appliedPromo&&appliedPromo.subtotal!==subtotal){
+      setAppliedPromo(null);
+      setPromoMessage("Your bag changed. Apply the promo code again.");
+    }
+  },[subtotal,appliedPromo]);
   useEffect(() => {
     if (checkoutTracked.current || !cart.length) return;
     checkoutTracked.current = true;
@@ -980,17 +991,31 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
     if (address.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address.email.trim())) missing.push("valid email address");
     return missing;
   };
+  const applyPromo=async event=>{
+    event.preventDefault();
+    setApplyingPromo(true);setPromoMessage("");
+    try{
+      const promo=await validatePromoCode({code:promoInput,subtotal});
+      setAppliedPromo(promo);setPromoInput(promo.code);
+      setPromoMessage(`${promo.code} applied — you save ${pkr(promo.discount_amount)}.`);
+    }catch(error){setAppliedPromo(null);setPromoMessage(error.message)}
+    finally{setApplyingPromo(false)}
+  };
+  const removePromo=()=>{setAppliedPromo(null);setPromoInput("");setPromoMessage("")};
   const placeOrder=async()=>{
     const chime=prepareOrderChime();
     setPlacing(true);setError("");
     try{
       if(saveDetails&&user?.id)await saveDefaultAddress({userId:user.id,address,addressId:savedAddressId});
-      const result=await placeCodOrder({shippingAddress:address,items:grouped});
-      trackMetaEvent("Purchase",orderMetaPayload({order:result,items:grouped,total}));
+      const activePromo=appliedPromo?.subtotal===subtotal ? appliedPromo : null;
+      const result=await placeCodOrder({shippingAddress:address,items:grouped,promoCode:activePromo?.code});
+      const confirmedTotal=Number(result?.order_total)||total;
+      trackMetaEvent("Purchase",orderMetaPayload({order:result,items:grouped,total:confirmedTotal}));
       sendOrderReceivedEmail({
         order: result,
         shippingAddress: address,
-        total,
+        total: confirmedTotal,
+        promo: activePromo ? {code:activePromo.code,discount_amount:Number(result?.discount_amount)||discount} : null,
         items: grouped.map(item=>({
           name:item.name,
           quantity:item.quantity,
@@ -1039,7 +1064,7 @@ function Checkout({user,profile,cart,setCart,onLogin,onShop}) {
           <button className="primary confirm-order" disabled={placing} onClick={placeOrder}>{placing?"Placing order…":"Confirm cash on delivery order"} <ArrowRight size={17}/></button>{error&&<div className="auth-error checkout-form-error">{error}</div>}
         </div>}
       </section>
-      <aside className="checkout-summary"><h2>Order summary</h2>{grouped.map(item=><div className="summary-item" key={item.groupKey}><span>{item.name} <small>× {item.quantity}</small>{describeCustomization(item.customization)&&<em>{describeCustomization(item.customization)}</em>}</span><b>{pkr(item.price*item.quantity)}</b></div>)}<div className="summary-line"><span>Subtotal</span><b>{pkr(subtotal)}</b></div><div className="summary-line"><span>Delivery</span><b>{pkr(delivery)}</b></div><div className="summary-total"><span>Total</span><b>{pkr(total)}</b></div><p>Taxes, if applicable, are included.</p></aside>
+      <aside className="checkout-summary"><h2>Order summary</h2>{grouped.map(item=><div className="summary-item" key={item.groupKey}><span>{item.name} <small>× {item.quantity}</small>{describeCustomization(item.customization)&&<em>{describeCustomization(item.customization)}</em>}</span><b>{pkr(item.price*item.quantity)}</b></div>)}<form className="promo-apply" onSubmit={applyPromo}><label htmlFor="checkout-promo">Promo code</label><div><input id="checkout-promo" value={promoInput} onChange={event=>{setPromoInput(event.target.value.toUpperCase());setAppliedPromo(null);setPromoMessage("")}} placeholder="Enter code" autoComplete="off"/><button type="submit" disabled={applyingPromo||!promoInput.trim()}>{applyingPromo?"Checking…":"Apply"}</button></div>{promoMessage&&<p className={appliedPromo?"promo-success":"promo-error"} role="status">{appliedPromo&&<Check size={13}/>} {promoMessage}</p>}{appliedPromo&&<button className="promo-remove" type="button" onClick={removePromo}>Remove promo code</button>}</form><div className="summary-line"><span>Subtotal</span><b>{pkr(subtotal)}</b></div>{discount>0&&<div className="summary-line promo-discount"><span>Promo discount <small>{appliedPromo.code}</small></span><b>−{pkr(discount)}</b></div>}<div className="summary-line"><span>Delivery</span><b>{pkr(delivery)}</b></div><div className="summary-total"><span>Total</span><b>{pkr(total)}</b></div><p>Taxes, if applicable, are included.</p></aside>
     </div>
   </main>;
 }
@@ -1066,6 +1091,7 @@ const orderSearchText = order => [
   orderCustomerContact(order),
   orderAddress(order).city,
   orderAddress(order).complete_address,
+  orderAddress(order).promo_code,
   ...(order.order_items || []).map(orderItemTitle)
 ].join(" ").toLowerCase();
 
@@ -1154,7 +1180,7 @@ function AdminOrderDetail({order,onUpdated,onClose}) {
     <div className="order-detail-grid">
       <section><h3>Customer</h3><b>{orderCustomerName(order)}</b><p>{orderCustomerContact(order)||"No phone/email saved"}</p></section>
       <section><h3>Delivery</h3><p>{address.complete_address || "No address"}<br/>{address.city ? `${address.city}, Pakistan` : "Pakistan"}</p></section>
-      <section><h3>Total payable</h3><b>{pkr(order.total_amount)}</b><p>Cash on delivery</p></section>
+      <section><h3>Total payable</h3><b>{pkr(order.total_amount)}</b><p>{address.promo_code?`Promo ${address.promo_code}: −${pkr(address.promo_discount)}`:"Cash on delivery"}</p></section>
       <section><h3>Updated</h3><b>{new Date(order.updated_at || order.created_at).toLocaleString("en-PK",{dateStyle:"medium",timeStyle:"short"})}</b><p>{order.customer_message || "No custom customer message."}</p></section>
     </div>
     <div className="order-detail-items"><h3>Items and customizations</h3>{(order.order_items||[]).map(item=>{const custom=item.customization||{};const details=describeCustomization(custom)||[item.product_variants?.size,item.product_variants?.colors?.name].filter(Boolean).join(" · ")||"Standard";const productImages=item.product_variants?.products?.product_images||[];const image=[...productImages].sort((a,b)=>a.sort_order-b.sort_order)[0]?.url;return <article key={item.id}>{image&&<img src={imageKitUrl(image,120,150)} alt={orderItemTitle(item)}/>}<div><b>{orderItemTitle(item)} × {item.quantity}</b><span>{details}</span>{item.product_variants?.sku&&<small>SKU: {item.product_variants.sku}</small>}{custom.name_engraving&&<small>Name engraving: {custom.name_engraving}</small>}{custom.logo_engraving?.url&&<a href={custom.logo_engraving.url} target="_blank" rel="noreferrer">View uploaded logo</a>}{Object.keys(custom.measurements||{}).length>0&&<small>Measurements: {Object.entries(custom.measurements).filter(([,value])=>value).map(([key,value])=>`${key.replaceAll("_"," ")} ${value}″`).join(", ")}</small>}</div><strong>{pkr(Number(item.unit_price||0)*Number(item.quantity||1))}</strong></article>})}</div>
@@ -1289,12 +1315,86 @@ function AdminColorManager({ colors = [], onUpdated }) {
   </section>;
 }
 
+const localDateTimeValue = value => {
+  if (!value) return "";
+  const date = new Date(value);
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0,16);
+};
+
+function AdminPromoManager({ promoCodes = [], setupError = "", onUpdated }) {
+  const emptyForm = {code:"",discount_type:"percentage",value:"",min_order_amount:"0",max_discount_amount:"",usage_limit:"",starts_at:"",expires_at:"",is_active:true};
+  const [editingId,setEditingId] = useState(null);
+  const [form,setForm] = useState(emptyForm);
+  const [saving,setSaving] = useState(false);
+  const [feedback,setFeedback] = useState("");
+  const [successful,setSuccessful] = useState(false);
+  const reset = () => {setEditingId(null);setForm(emptyForm)};
+  const edit = promo => {
+    setEditingId(promo.id);
+    setForm({
+      code:promo.code||"",discount_type:promo.discount_type||"percentage",value:String(promo.value??""),
+      min_order_amount:String(promo.min_order_amount??0),max_discount_amount:promo.max_discount_amount==null?"":String(promo.max_discount_amount),
+      usage_limit:promo.usage_limit==null?"":String(promo.usage_limit),starts_at:localDateTimeValue(promo.starts_at),
+      expires_at:localDateTimeValue(promo.expires_at),is_active:promo.is_active!==false
+    });
+    setFeedback("");setSuccessful(false);
+  };
+  const submit = async event => {
+    event.preventDefault();setSaving(true);setFeedback("");setSuccessful(false);
+    try {
+      const code=form.code.trim().toUpperCase();
+      const value=Number(form.value);
+      if(!/^[A-Z0-9_-]{3,30}$/.test(code))throw new Error("Use 3–30 letters, numbers, hyphens or underscores for the code.");
+      if(!value||value<=0)throw new Error("Discount value must be greater than zero.");
+      if(form.discount_type==="percentage"&&value>100)throw new Error("Percentage discount cannot exceed 100%.");
+      if(form.usage_limit!==""&&(!Number.isInteger(Number(form.usage_limit))||Number(form.usage_limit)<1))throw new Error("Usage limit must be a positive whole number.");
+      if(form.starts_at&&form.expires_at&&new Date(form.expires_at)<=new Date(form.starts_at))throw new Error("Expiry must be later than the start date.");
+      await savePromoCode({id:editingId,...form,code});
+      setFeedback(editingId?"Promo code updated.":"Promo code created.");setSuccessful(true);reset();await onUpdated();
+    } catch(error){setFeedback(error.message)}
+    finally{setSaving(false)}
+  };
+  const toggleActive = async promo => {
+    setSaving(true);setFeedback("");setSuccessful(false);
+    try{
+      await setPromoCodeActive(promo.id,!promo.is_active);
+      setFeedback(promo.is_active?"Promo code deactivated.":"Promo code activated.");setSuccessful(true);await onUpdated();
+    }catch(error){setFeedback(error.message)}
+    finally{setSaving(false)}
+  };
+  return <section className="admin-promos-panel">
+    <div className="panel-head"><div><p className="eyebrow">PROMOTIONS</p><h2>Promo codes</h2></div><span><Tag size={15}/> {promoCodes.filter(promo=>promo.is_active).length} active</span></div>
+    {setupError?<div className="auth-error promo-setup-error">{setupError}</div>:<>
+      <form className="promo-editor" onSubmit={submit}>
+        <label>Code *<input value={form.code} maxLength="30" onChange={event=>setForm({...form,code:event.target.value.toUpperCase().replace(/\s+/g,"")})} placeholder="MEDZ10" required/></label>
+        <label>Discount type<select value={form.discount_type} onChange={event=>setForm({...form,discount_type:event.target.value,max_discount_amount:event.target.value==="fixed"?"":form.max_discount_amount})}><option value="percentage">Percentage (%)</option><option value="fixed">Fixed amount (PKR)</option></select></label>
+        <label>{form.discount_type==="percentage"?"Percentage *":"Fixed amount (PKR) *"}<input type="number" min="0.01" max={form.discount_type==="percentage"?100:undefined} step="0.01" value={form.value} onChange={event=>setForm({...form,value:event.target.value})} required/></label>
+        <label>Minimum order (PKR)<input type="number" min="0" step="1" value={form.min_order_amount} onChange={event=>setForm({...form,min_order_amount:event.target.value})}/></label>
+        <label>Maximum discount (PKR)<small>Percentage codes only</small><input type="number" min="0" step="1" disabled={form.discount_type!=="percentage"} value={form.max_discount_amount} onChange={event=>setForm({...form,max_discount_amount:event.target.value})} placeholder="No cap"/></label>
+        <label>Total usage limit<small>Leave blank for unlimited</small><input type="number" min="1" step="1" value={form.usage_limit} onChange={event=>setForm({...form,usage_limit:event.target.value})} placeholder="Unlimited"/></label>
+        <label>Starts at<small>Optional</small><input type="datetime-local" value={form.starts_at} onChange={event=>setForm({...form,starts_at:event.target.value})}/></label>
+        <label>Expires at<small>Optional</small><input type="datetime-local" value={form.expires_at} onChange={event=>setForm({...form,expires_at:event.target.value})}/></label>
+        <label className="promo-active-check"><input type="checkbox" checked={form.is_active} onChange={event=>setForm({...form,is_active:event.target.checked})}/><span>Active and available at checkout</span></label>
+        <div className="promo-editor-actions"><button className="primary" disabled={saving}>{saving?"Saving…":editingId?"Save promo":"Create promo"}</button>{editingId&&<button type="button" onClick={reset}>Cancel edit</button>}</div>
+      </form>
+      {feedback&&<p className={successful?"admin-order-success":"admin-order-error"} role="status">{feedback}</p>}
+      {promoCodes.length?<div className="promo-code-list">{promoCodes.map(promo=>{const exhausted=promo.usage_limit!=null&&promo.used_count>=promo.usage_limit;return <article key={promo.id} className={!promo.is_active||exhausted?"inactive":""}>
+        <div><b>{promo.code}</b><span>{promo.discount_type==="percentage"?`${Number(promo.value)}% off`:`${pkr(promo.value)} off`}{Number(promo.min_order_amount)>0?` · Min ${pkr(promo.min_order_amount)}`:""}</span></div>
+        <div><small>USES</small><strong>{promo.used_count}{promo.usage_limit==null?" / Unlimited":` / ${promo.usage_limit}`}</strong></div>
+        <div><small>STATUS</small><strong>{exhausted?"Exhausted":promo.is_active?"Active":"Inactive"}</strong></div>
+        <div className="promo-row-actions"><button type="button" onClick={()=>edit(promo)}>Edit</button><button type="button" disabled={saving||exhausted} onClick={()=>toggleActive(promo)}>{promo.is_active?"Deactivate":"Activate"}</button></div>
+      </article>})}</div>:<div className="admin-empty">No promo codes yet. Create the first one above.</div>}
+    </>}
+  </section>;
+}
+
 function Admin({ user, profile, authReady, catalogLoading, onLogin, onOrders, products, onCreated }) {
   const [uploading,setUploading] = useState(false);
   const [productImages,setProductImages] = useState([]);
   const [removedImageFileIds,setRemovedImageFileIds] = useState([]);
   const [uploadError,setUploadError] = useState("");
-  const [adminData,setAdminData] = useState({categories:[],colors:[],clothTypes:[],orders:[],reviews:[]});
+  const [adminData,setAdminData] = useState({categories:[],colors:[],clothTypes:[],orders:[],reviews:[],promoCodes:[],promoSetupError:""});
   const [showForm,setShowForm] = useState(false);
   const [editingId,setEditingId] = useState(null);
   const [saving,setSaving] = useState(false);
@@ -1429,6 +1529,7 @@ function Admin({ user, profile, authReady, catalogLoading, onLogin, onOrders, pr
       <div className="editor-actions"><button type="button" onClick={()=>{resetEditor();setShowForm(false)}}>Cancel</button><button className="primary" disabled={saving||uploading}>{saving?"Saving…":editingId?"Save changes":"Publish product"} <ArrowRight size={16}/></button></div>
     </form>}
     <div className="metrics">{metrics.map((m,i)=><div key={m[0]}><span>{i===0?<BarChart3/>:i===1?<ShoppingBag/>:i===2?<Package/>:<Sparkles/>}</span><p>{m[0]}</p>{m[1] == null ? <span className="skeleton skeleton-title small"/> : <h2>{m[1]}</h2>}{m[2] == null ? <span className="skeleton skeleton-line short"/> : <small>{m[2]}</small>}</div>)}</div>
+    <AdminPromoManager promoCodes={adminData.promoCodes} setupError={adminData.promoSetupError} onUpdated={loadAdminData}/>
     <AdminColorManager colors={adminData.colors} onUpdated={loadAdminData} />
     <AdminReviewManager reviews={adminData.reviews} onUpdated={async()=>{ await loadAdminData(); await onCreated(); }} />
     <section className="admin-orders-panel"><div className="panel-head"><div><p className="eyebrow">FULFILMENT</p><h2>Manage received orders</h2></div><span>{adminData.orders.length} recent</span></div>{adminData.orders.length?<div className="admin-order-list">{adminData.orders.map(order=><AdminOrderEditor key={order.id} order={order} onUpdated={loadAdminData}/>)}</div>:<div className="admin-empty">No orders yet.</div>}</section>

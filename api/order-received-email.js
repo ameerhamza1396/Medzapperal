@@ -12,7 +12,7 @@ const itemDetails = customization => [
   customization?.addons?.length && `Add-ons: ${customization.addons.join(", ")}`
 ].filter(Boolean).join(" · ");
 
-function orderHtml({ user = {}, order, shippingAddress, items, total }) {
+function orderHtml({ user = {}, order, shippingAddress, items, total, promo }) {
   const rows = (items || []).map(item => `<tr>
     <td style="padding:10px 0;border-bottom:1px solid #e6e3dc"><strong>${escapeHtml(item.name)}</strong><br><span style="color:#667">${escapeHtml(itemDetails(item.customization) || "Standard")}</span></td>
     <td style="padding:10px 0;border-bottom:1px solid #e6e3dc;text-align:center">${escapeHtml(item.quantity)}</td>
@@ -29,6 +29,7 @@ function orderHtml({ user = {}, order, shippingAddress, items, total }) {
           <thead><tr><th align="left">Item</th><th>Qty</th><th align="right">Price</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
+        ${promo?.code ? `<p style="color:#0a665d"><strong>Promo ${escapeHtml(promo.code)}:</strong> −Rs ${Number(promo.discount_amount || 0).toLocaleString("en-PK")}</p>` : ""}
         <p style="font-size:18px"><strong>Total payable:</strong> Rs ${Number(total || order?.order_total || 0).toLocaleString("en-PK")}</p>
         <p><strong>Delivery address:</strong><br>${escapeHtml(shippingAddress?.complete_address)}, ${escapeHtml(shippingAddress?.city)}, Pakistan<br>${escapeHtml(shippingAddress?.mobile || "")}</p>
         <p style="color:#667;line-height:1.6">Our team will contact you before dispatch. Standard delivery time is 8–12 working days.</p>

@@ -111,22 +111,50 @@ export async function archiveProduct(id) {
   if (error) throw error;
 }
 
-export async function placeCodOrder({ shippingAddress, items }) {
+export async function validatePromoCode({ code, subtotal }) {
+  if (!supabase) throw new Error("Supabase is not configured.");
+  const normalizedCode = String(code || "").trim().toUpperCase();
+  if (!normalizedCode) throw new Error("Enter a promo code.");
+  const { data, error } = await supabase.rpc("validate_promo_code", {
+    p_code: normalizedCode,
+    p_subtotal: Number(subtotal) || 0
+  });
+  if (error) throw error;
+  const promo = Array.isArray(data) ? data[0] : data;
+  if (!promo) throw new Error("Promo code is invalid.");
+  return {
+    ...promo,
+    code: promo.code || normalizedCode,
+    value: Number(promo.value) || 0,
+    discount_amount: Number(promo.discount_amount) || 0,
+    subtotal: Number(subtotal) || 0
+  };
+}
+
+export async function placeCodOrder({ shippingAddress, items, promoCode }) {
   if (!supabase) throw new Error("Supabase is not configured.");
   const payload = items.map(item => ({
     variant_id: item.variantId,
     quantity: item.quantity,
     customization: item.customization || {}
   }));
-  const { data, error } = await supabase.rpc("place_cod_order", {
+  const params = {
     p_shipping_address: shippingAddress,
-    p_items: payload
-  });
+    p_items: payload,
+    p_promo_code: promoCode?.trim().toUpperCase() || null
+  };
+  let { data, error } = await supabase.rpc("place_cod_order", params);
+  if (error && !promoCode && ["PGRST202","42883"].includes(error.code)) {
+    ({ data, error } = await supabase.rpc("place_cod_order", {
+      p_shipping_address: shippingAddress,
+      p_items: payload
+    }));
+  }
   if (error) throw error;
   return Array.isArray(data) ? data[0] : data;
 }
 
-export async function sendOrderReceivedEmail({ order, shippingAddress, items, total }) {
+export async function sendOrderReceivedEmail({ order, shippingAddress, items, total, promo }) {
   const { data: { session } } = supabase ? await supabase.auth.getSession() : { data: { session: null } };
   await fetch("/api/order-received-email", {
     method: "POST",
@@ -134,7 +162,7 @@ export async function sendOrderReceivedEmail({ order, shippingAddress, items, to
       "Content-Type": "application/json",
       ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {})
     },
-    body: JSON.stringify({ order, shippingAddress, items, total })
+    body: JSON.stringify({ order, shippingAddress, items, total, promo })
   });
 }
 
@@ -216,13 +244,14 @@ export async function updateOrderStatus({ orderId, status, customerMessage }) {
 }
 
 export async function fetchAdminData() {
-  if (!supabase) return { categories: [], colors: [], clothTypes: [], orders: [], reviews: [] };
-  const [categories, colors, clothTypes, orders, reviews] = await Promise.all([
+  if (!supabase) return { categories: [], colors: [], clothTypes: [], orders: [], reviews: [], promoCodes: [] };
+  const [categories, colors, clothTypes, orders, reviews, promoCodes] = await Promise.all([
     supabase.from("categories").select("id,name,slug").eq("is_active",true).order("sort_order"),
     supabase.from("colors").select("id,name,hex").order("name"),
     supabase.from("cloth_types").select("id,name").order("name"),
     supabase.from("orders").select("id,status,total_amount,shipping_address,internal_notes,created_at,updated_at,order_items(id,quantity,unit_price,customization,product_variants(size,colors(name),products(name)))").order("created_at",{ascending:false}).limit(10),
-    supabase.from("customer_reviews").select("id,title,image_url,image_file_id,sort_order,is_active,created_at").order("sort_order").order("created_at",{ascending:false})
+    supabase.from("customer_reviews").select("id,title,image_url,image_file_id,sort_order,is_active,created_at").order("sort_order").order("created_at",{ascending:false}),
+    supabase.from("promo_codes").select("id,code,discount_type,value,min_order_amount,max_discount_amount,usage_limit,used_count,starts_at,expires_at,is_active,created_at,updated_at").order("created_at",{ascending:false})
   ]);
   for (const result of [categories, colors, clothTypes, orders, reviews]) if (result.error) throw result.error;
   return {
@@ -230,7 +259,9 @@ export async function fetchAdminData() {
     colors: colors.data,
     clothTypes: clothTypes.data,
     orders: orders.data.map(order => ({ ...order, customer_message: order.internal_notes })),
-    reviews: reviews.data || []
+    reviews: reviews.data || [],
+    promoCodes: promoCodes.error ? [] : promoCodes.data || [],
+    promoSetupError: promoCodes.error ? "Run the promo-code SQL migration in Supabase to enable this section." : ""
   };
 }
 
@@ -308,6 +339,33 @@ export async function archiveColor(colorId) {
   if (usedError) throw usedError;
   if (used?.length) throw new Error("This colour is used by product variants. Remove it from products before deleting.");
   const { error } = await supabase.from("colors").delete().eq("id", colorId);
+  if (error) throw error;
+}
+
+export async function savePromoCode(promo) {
+  if (!supabase) throw new Error("Supabase is not configured.");
+  const row = {
+    code: String(promo.code || "").trim().toUpperCase(),
+    discount_type: promo.discount_type,
+    value: Number(promo.value),
+    min_order_amount: Number(promo.min_order_amount) || 0,
+    max_discount_amount: promo.discount_type === "percentage" && promo.max_discount_amount !== "" && promo.max_discount_amount != null
+      ? Number(promo.max_discount_amount)
+      : null,
+    usage_limit: promo.usage_limit !== "" && promo.usage_limit != null ? Number(promo.usage_limit) : null,
+    starts_at: promo.starts_at ? new Date(promo.starts_at).toISOString() : null,
+    expires_at: promo.expires_at ? new Date(promo.expires_at).toISOString() : null,
+    is_active: promo.is_active !== false
+  };
+  const result = promo.id
+    ? await supabase.from("promo_codes").update(row).eq("id", promo.id)
+    : await supabase.from("promo_codes").insert(row);
+  if (result.error) throw result.error;
+}
+
+export async function setPromoCodeActive(promoId, isActive) {
+  if (!supabase) throw new Error("Supabase is not configured.");
+  const { error } = await supabase.from("promo_codes").update({ is_active: isActive }).eq("id", promoId);
   if (error) throw error;
 }
 
