@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 import {
   ArrowLeft, ArrowRight, Banknote, BarChart3, Check, ChevronDown, CircleUserRound,
@@ -826,6 +827,22 @@ function Product({product,add,buyNow,openProduct,products,onBack}) {
     setNameEngraving(Boolean(nextAttributes.forceCustomize && nextAttributes.name));
     setLogoEngraving(false); setEngravingName(""); setLogo(null); setCustomSizing(false); setAddons([]); setOpenInfo(""); setGalleryZoom({active:false,x:50,y:50});
   },[product]);
+  useEffect(()=>{
+    if (!sizeChart) return undefined;
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+    const closeOnEscape = event => {
+      if (event.key === "Escape") setSizeChart(false);
+    };
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overflow = previousHtmlOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  },[sizeChart]);
   const customization = effectiveCustomize ? {
     gender:attributes.gender ? gender : null,
     sleeve:attributes.sleeve ? sleeve : null,
@@ -878,7 +895,7 @@ function Product({product,add,buyNow,openProduct,products,onBack}) {
         <p className="eyebrow">{product.category} · {product.gender === "Unisex" ? "Men & Women" : product.gender}</p><h1>{product.name}</h1><p className={product.isOnSale?"price sale-price":"price"}>{product.isOnSale&&<del>{pkr(product.regularPrice)}</del>}{pkr(product.price)}</p>
         {attributes.gender&&<div className="selector"><div><b>Gender</b><span>{gender}</span></div><div className="size-options">{genderOptions.map(option=><button key={option} className={gender===option?"selected":""} onClick={()=>setGender(option)}>{option}</button>)}</div></div>}
         {attributes.color&&!colourBased&&<div className="selector"><div><b>Colour</b><span>{color}</span></div><div className="color-options">{allowedColors.map(c=><button key={c} className={color===c?"selected":""} onClick={()=>setColor(c)} style={{"--swatch":product.variants.find(variant=>variant.colors?.name===c)?.colors?.hex||palette[c]||"#888"}} aria-label={c}/>)}</div></div>}
-        {attributes.size&&<div className="selector"><div><b>Size</b><button className="underlined" onClick={()=>setSizeChart(true)}>Size chart</button></div><div className="size-options">{allowedSizes.map(s=><button key={s} className={size===s?"selected":""} onClick={()=>setSize(s)}>{s}</button>)}</div></div>}
+        {attributes.size&&<div className="selector"><div><b>Size</b><button className="underlined" aria-haspopup="dialog" onClick={()=>setSizeChart(true)}>Size chart</button></div><div className="size-options">{allowedSizes.map(s=><button key={s} className={size===s?"selected":""} onClick={()=>setSize(s)}>{s}</button>)}</div></div>}
         {scrubDesignProduct&&<div className="selector design-selector"><div><b>Design</b><span>{scrubDesign.title}</span></div><div className="scrub-design-grid">{scrubDesignOptions.map(option=><button key={option.title} className={scrubDesign.title===option.title?"selected":""} onClick={()=>setScrubDesign(option)}><img src={option.url} alt={`${option.title} scrub design`}/><span>{option.title}</span></button>)}</div></div>}
         {hasCustomization&&<section className="customization-panel"><div className="customization-head"><div><b>{attributes.forceCustomize?"Customize this item":"Customize this item"}</b><span>{attributes.label}</span></div>{!attributes.forceCustomize&&<div className="yes-no"><button className={!customize?"selected":""} onClick={()=>setCustomize(false)}>No</button><button className={customize?"selected":""} onClick={()=>setCustomize(true)}>Yes</button></div>}</div>{effectiveCustomize&&<div className="customization-fields">
           {attributes.sleeve&&<OptionButtons label="Sleeve" options={["Half","Quarter","Full"]} value={sleeve} setValue={setSleeve}/>}
@@ -895,7 +912,7 @@ function Product({product,add,buyNow,openProduct,products,onBack}) {
       </div>
     </div>
     <ProductRow title="Complete the rotation." label="YOU MAY ALSO LIKE" list={products.filter(p=>p.id!==product.id).slice(0,4)} {...{openProduct,add}} goShop={()=>{}}/>
-    {sizeChart&&<div className="modal-backdrop size-chart-backdrop" onClick={()=>setSizeChart(false)}><section className="size-chart-modal uploaded-size-chart" onClick={event=>event.stopPropagation()}><button className="modal-close" onClick={()=>setSizeChart(false)}><X/></button><img src="/media/medz-size-chart.jpg" alt="Medz Apparel size chart"/></section></div>}
+    {sizeChart&&createPortal(<div className="modal-backdrop size-chart-backdrop" onClick={()=>setSizeChart(false)}><section className="size-chart-modal uploaded-size-chart" role="dialog" aria-modal="true" aria-label="Medz Apparel size chart" onClick={event=>event.stopPropagation()}><button className="modal-close" aria-label="Close size chart" onClick={()=>setSizeChart(false)}><X/></button><img src="/media/medz-size-chart.jpg" alt="Medz Apparel size chart" draggable="false"/></section></div>,document.body)}
   </main>;
 }
 
